@@ -74,7 +74,9 @@ CONST_DEFAULT_TILE_STRIDE: int = 256
 CONST_DEFAULT_POINTS_PER_TILE: int = 24
 CONST_DEFAULT_POINT_MIN_DISTANCE: int = 14
 CONST_DEFAULT_POINT_QUALITY_LEVEL: float = 0.03
+CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
 CONST_DEFAULT_DEDUP_IOU: float = 0.60
+CONST_DEFAULT_BBOX_DEDUP_IOU: float = 0.85
 CONST_DEFAULT_MULTIMASK_OUTPUT: bool = True
 
 CONST_SUPPORTED_IMAGE_SUFFIXES: tp.Tuple[str, ...] = (
@@ -114,7 +116,9 @@ class Sam2AspectRatioConfig:
     int_pointsPerTile: int = CONST_DEFAULT_POINTS_PER_TILE
     int_pointMinDistance: int = CONST_DEFAULT_POINT_MIN_DISTANCE
     float_pointQualityLevel: float = CONST_DEFAULT_POINT_QUALITY_LEVEL
+    int_pointBatchSize: int = CONST_DEFAULT_POINT_BATCH_SIZE
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU
+    float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS
@@ -222,7 +226,7 @@ def sample_interest_points(
     int_minDistance: int,
     float_qualityLevel: float,
 ) -> tp.List[tp.Tuple[int, int]]:
-    """타일 내에서 blob/edge 후보 위치를 샘플링."""
+    """타일 내에서 blob/edge 후보 위치를 샘플링하고 score 기준으로 상위 point를 선택."""
     arr_enhanced = enhance_image_texture(arr_tileGray)
     arr_corners = cv2.goodFeaturesToTrack(
         arr_enhanced,
@@ -234,14 +238,17 @@ def sample_interest_points(
         useHarrisDetector=False,
     )
 
-    list_points = list()
+    list_scoredPoints: tp.List[tp.Tuple[int, int, float]] = list()
     if arr_corners is not None:
         for arr_c in arr_corners[:, 0, :]:
             int_x = int(round(arr_c[0]))
             int_y = int(round(arr_c[1]))
-            list_points.append((int_x, int_y))
+            int_x = int(np.clip(int_x, 0, arr_enhanced.shape[1] - 1))
+            int_y = int(np.clip(int_y, 0, arr_enhanced.shape[0] - 1))
+            float_score = float(arr_enhanced[int_y, int_x])
+            list_scoredPoints.append((int_x, int_y, float_score))
 
-    if len(list_points) < max(8, int_maxPoints // 2):
+    if len(list_scoredPoints) < max(8, int_maxPoints // 2):
         _, arr_th = cv2.threshold(arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         arr_kernelOpen = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         arr_th = cv2.morphologyEx(arr_th, cv2.MORPH_OPEN, arr_kernelOpen)
@@ -255,12 +262,17 @@ def sample_interest_points(
                 continue
             int_x = int(round(dict_m["m10"] / dict_m["m00"]))
             int_y = int(round(dict_m["m01"] / dict_m["m00"]))
-            list_points.append((int_x, int_y))
-            if len(list_points) >= int_maxPoints * 2:
+            int_x = int(np.clip(int_x, 0, arr_enhanced.shape[1] - 1))
+            int_y = int(np.clip(int_y, 0, arr_enhanced.shape[0] - 1))
+            float_score = float(arr_enhanced[int_y, int_x]) + float_area
+            list_scoredPoints.append((int_x, int_y, float_score))
+            if len(list_scoredPoints) >= int_maxPoints * 3:
                 break
 
+    list_scoredPoints.sort(key=lambda tpl_item: tpl_item[2], reverse=True)
+
     list_kept = list()
-    for int_px, int_py in list_points:
+    for int_px, int_py, _ in list_scoredPoints:
         bool_tooClose = False
         for int_qx, int_qy in list_kept:
             if (int_px - int_qx) ** 2 + (int_py - int_qy) ** 2 < int_minDistance ** 2:
@@ -280,6 +292,42 @@ def calculate_binary_iou(arr_maskA: np.ndarray, arr_maskB: np.ndarray) -> float:
     if int_union == 0:
         return 0.0
     return float(int_inter / int_union)
+
+
+def calculate_box_iou(
+    tuple_boxA: tp.Tuple[int, int, int, int],
+    tuple_boxB: tp.Tuple[int, int, int, int],
+) -> float:
+    """두 bbox(x, y, w, h) 간 IoU 계산."""
+    int_ax1, int_ay1, int_aw, int_ah = tuple_boxA
+    int_bx1, int_by1, int_bw, int_bh = tuple_boxB
+    int_ax2 = int_ax1 + int_aw
+    int_ay2 = int_ay1 + int_ah
+    int_bx2 = int_bx1 + int_bw
+    int_by2 = int_by1 + int_bh
+
+    int_ix1 = max(int_ax1, int_bx1)
+    int_iy1 = max(int_ay1, int_by1)
+    int_ix2 = min(int_ax2, int_bx2)
+    int_iy2 = min(int_ay2, int_by2)
+
+    int_interW = max(0, int_ix2 - int_ix1)
+    int_interH = max(0, int_iy2 - int_iy1)
+    int_inter = int_interW * int_interH
+    int_union = int_aw * int_ah + int_bw * int_bh - int_inter
+    if int_union <= 0:
+        return 0.0
+    return float(int_inter / int_union)
+
+
+def iter_chunks(
+    list_items: tp.Sequence[tp.Tuple[int, int]],
+    int_chunkSize: int,
+) -> tp.Iterable[tp.Sequence[tp.Tuple[int, int]]]:
+    """리스트를 고정 크기 chunk로 분할."""
+    int_chunkSize = max(1, int_chunkSize)
+    for int_idx in range(0, len(list_items), int_chunkSize):
+        yield list_items[int_idx:int_idx + int_chunkSize]
 
 
 class Sam2AspectRatioService:
@@ -457,10 +505,12 @@ class Sam2AspectRatioService:
 
         list_keptMasks = list()
         list_keptScores = list()
+        list_keptBboxes: tp.List[tp.Tuple[int, int, int, int]] = list()
         list_debugTiles = list()
         list_debugPoints = list()
         int_candidateCount = 0
         int_acceptedCount = 0
+        int_bboxDedupRejected = 0
 
         for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
             arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
@@ -475,9 +525,9 @@ class Sam2AspectRatioService:
                 {
                     "tile_index": int_tileIdx,
                     "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
-                    "num_points": len(list_points),
-                }
-            )
+                        "num_points": len(list_points),
+                    }
+                )
             for int_px, int_py in list_points:
                 int_candidateCount += 1
                 list_debugPoints.append(
@@ -488,10 +538,13 @@ class Sam2AspectRatioService:
                         "point_xy_roi": [int_tx1 + int_px, int_ty1 + int_py],
                     }
                 )
+
+            for list_pointChunk in iter_chunks(list_points, self.obj_config.int_pointBatchSize):
+                list_chunkLabels = [1] * len(list_pointChunk)
                 list_results = self.obj_model(  # type: ignore[misc]
                     source=arr_tileBgr,
-                    points=[[int_px, int_py]],
-                    labels=[1],
+                    points=[[int_px, int_py] for int_px, int_py in list_pointChunk],
+                    labels=list_chunkLabels,
                     **dict_predictCommon,
                 )
                 if not list_results:
@@ -524,7 +577,22 @@ class Sam2AspectRatioService:
                         int_width=int_tileWidth,
                         int_height=int_tileHeight,
                         int_margin=self.obj_config.int_tileEdgeMargin,
-                    ):
+                        ):
+                        continue
+
+                    tuple_globalBox = (
+                        int_tx1 + int_bx,
+                        int_ty1 + int_by,
+                        int_bw,
+                        int_bh,
+                    )
+                    bool_bboxDup = False
+                    for tuple_prevBox in list_keptBboxes:
+                        if calculate_box_iou(tuple_prevBox, tuple_globalBox) >= self.obj_config.float_bboxDedupIou:
+                            bool_bboxDup = True
+                            break
+                    if bool_bboxDup:
+                        int_bboxDedupRejected += 1
                         continue
 
                     arr_roiMask = np.zeros((int_roiHeight, int_roiWidth), dtype=np.uint8)
@@ -540,6 +608,7 @@ class Sam2AspectRatioService:
 
                     int_acceptedCount += 1
                     list_keptMasks.append(arr_roiMask)
+                    list_keptBboxes.append(tuple_globalBox)
                     if arr_tileScores is not None and int_maskIdx < len(arr_tileScores):
                         list_keptScores.append(float(arr_tileScores[int_maskIdx]))
                     else:
@@ -560,6 +629,7 @@ class Sam2AspectRatioService:
             "num_tiles": len(list_tiles),
             "num_candidate_points": int_candidateCount,
             "num_accepted_masks": int_acceptedCount,
+            "num_bbox_dedup_rejected": int_bboxDedupRejected,
             "tiles": list_debugTiles,
             "candidate_points": list_debugPoints,
         }
@@ -817,7 +887,9 @@ class Sam2AspectRatioService:
             "points_per_tile": int(self.obj_config.int_pointsPerTile),
             "point_min_distance": int(self.obj_config.int_pointMinDistance),
             "point_quality_level": float(self.obj_config.float_pointQualityLevel),
+            "point_batch_size": int(self.obj_config.int_pointBatchSize),
             "dedup_iou": float(self.obj_config.float_dedupIou),
+            "bbox_dedup_iou": float(self.obj_config.float_bboxDedupIou),
             "multimask_output_requested": bool(self.obj_config.bool_multimaskOutput),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "mask_binarize_threshold": float(self.obj_config.float_maskBinarizeThreshold),
@@ -964,6 +1036,7 @@ class Sam2AspectRatioService:
         dict_summary["num_tiles"] = dict_debug.get("num_tiles")
         dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
         dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
+        dict_summary["num_bbox_dedup_rejected"] = dict_debug.get("num_bbox_dedup_rejected")
         self.save_outputs(
             arr_inputBgr,
             arr_inputRoiBgr,
@@ -1130,7 +1203,9 @@ def run_sam2_aspect_ratio(
     int_pointsPerTile: int = CONST_DEFAULT_POINTS_PER_TILE,
     int_pointMinDistance: int = CONST_DEFAULT_POINT_MIN_DISTANCE,
     float_pointQualityLevel: float = CONST_DEFAULT_POINT_QUALITY_LEVEL,
+    int_pointBatchSize: int = CONST_DEFAULT_POINT_BATCH_SIZE,
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
+    float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
@@ -1167,7 +1242,9 @@ def run_sam2_aspect_ratio(
             int_pointsPerTile=int_pointsPerTile,
             int_pointMinDistance=int_pointMinDistance,
             float_pointQualityLevel=float_pointQualityLevel,
+            int_pointBatchSize=int_pointBatchSize,
             float_dedupIou=float_dedupIou,
+            float_bboxDedupIou=float_bboxDedupIou,
             bool_multimaskOutput=bool_multimaskOutput,
             str_device=str_device,
             bool_retinaMasks=bool_retinaMasks,
@@ -1391,10 +1468,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="goodFeaturesToTrack qualityLevel",
     )
     obj_parser.add_argument(
+        "--point_batch_size",
+        type=int,
+        default=CONST_DEFAULT_POINT_BATCH_SIZE,
+        help="한 번의 SAM2 호출에 묶어 넣을 point 수",
+    )
+    obj_parser.add_argument(
         "--dedup_iou",
         type=float,
         default=CONST_DEFAULT_DEDUP_IOU,
         help="타일/포인트 간 중복 마스크 제거 IoU threshold",
+    )
+    obj_parser.add_argument(
+        "--bbox_dedup_iou",
+        type=float,
+        default=CONST_DEFAULT_BBOX_DEDUP_IOU,
+        help="IoU dedup 전에 적용할 bbox 중복 제거 IoU threshold",
     )
     obj_parser.add_argument(
         "--device",
@@ -1451,7 +1540,9 @@ def main() -> None:
         int_pointsPerTile=obj_args.points_per_tile,
         int_pointMinDistance=obj_args.point_min_distance,
         float_pointQualityLevel=obj_args.point_quality_level,
+        int_pointBatchSize=obj_args.point_batch_size,
         float_dedupIou=obj_args.dedup_iou,
+        float_bboxDedupIou=obj_args.bbox_dedup_iou,
         bool_multimaskOutput=obj_args.multimask_output,
         str_device=obj_args.device,
         bool_retinaMasks=obj_args.retina_masks,
