@@ -27,6 +27,7 @@ import os
 import shutil
 import typing as tp
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -64,9 +65,16 @@ CONST_MASK_MORPH_OPEN_ITERATIONS: int = 0
 CONST_MASK_MORPH_CLOSE_ITERATIONS: int = 0
 
 # 기본 SAM2 추론 파라미터
-CONST_DEFAULT_IMAGE_SIZE: int = 1024
+CONST_DEFAULT_IMAGE_SIZE: int = 1536
 CONST_DEFAULT_RETINA_MASKS: bool = True
 CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS: bool = True
+CONST_DEFAULT_TILE_SIZE: int = 512
+CONST_DEFAULT_TILE_STRIDE: int = 256
+CONST_DEFAULT_POINTS_PER_TILE: int = 24
+CONST_DEFAULT_POINT_MIN_DISTANCE: int = 14
+CONST_DEFAULT_POINT_QUALITY_LEVEL: float = 0.03
+CONST_DEFAULT_DEDUP_IOU: float = 0.60
+CONST_DEFAULT_MULTIMASK_OUTPUT: bool = True
 
 CONST_SUPPORTED_IMAGE_SUFFIXES: tp.Tuple[str, ...] = (
     ".jpg",
@@ -99,6 +107,13 @@ class Sam2AspectRatioConfig:
     int_maskMorphOpenIterations: int = CONST_MASK_MORPH_OPEN_ITERATIONS
     int_maskMorphCloseIterations: int = CONST_MASK_MORPH_CLOSE_ITERATIONS
     int_imgSize: int = CONST_DEFAULT_IMAGE_SIZE
+    int_tileSize: int = CONST_DEFAULT_TILE_SIZE
+    int_stride: int = CONST_DEFAULT_TILE_STRIDE
+    int_pointsPerTile: int = CONST_DEFAULT_POINTS_PER_TILE
+    int_pointMinDistance: int = CONST_DEFAULT_POINT_MIN_DISTANCE
+    float_pointQualityLevel: float = CONST_DEFAULT_POINT_QUALITY_LEVEL
+    float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU
+    bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT
     str_device: tp.Optional[str] = None
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS
@@ -129,6 +144,140 @@ class Sam2AspectRatioResult:
 
     list_objects: tp.List[ObjectMeasurement]
     dict_summary: tp.Dict[str, tp.Any]
+
+
+def normalize_image_to_uint8(arr_img: np.ndarray) -> np.ndarray:
+    """이미지를 0~255 uint8 범위로 정규화."""
+    arr_f32 = arr_img.astype(np.float32)
+    float_mn = float(arr_f32.min())
+    float_mx = float(arr_f32.max())
+    if float_mx - float_mn < 1e-8:
+        return np.zeros_like(arr_img, dtype=np.uint8)
+    arr_out = (arr_f32 - float_mn) / (float_mx - float_mn)
+    return (arr_out * 255.0).clip(0, 255).astype(np.uint8)
+
+
+def create_processing_tiles(
+    int_x1: int,
+    int_y1: int,
+    int_x2: int,
+    int_y2: int,
+    int_tileSize: int,
+    int_stride: int,
+) -> tp.List[tp.Tuple[int, int, int, int]]:
+    """ROI 내부를 타일로 분할."""
+    list_tiles = list()
+    if int_x2 - int_x1 <= int_tileSize and int_y2 - int_y1 <= int_tileSize:
+        list_tiles.append((int_x1, int_y1, int_x2, int_y2))
+        return list_tiles
+
+    list_xs = list(range(int_x1, max(int_x1 + 1, int_x2 - int_tileSize + 1), int_stride))
+    list_ys = list(range(int_y1, max(int_y1 + 1, int_y2 - int_tileSize + 1), int_stride))
+
+    if list_xs and list_xs[-1] != int_x2 - int_tileSize:
+        list_xs.append(max(int_x1, int_x2 - int_tileSize))
+    if list_ys and list_ys[-1] != int_y2 - int_tileSize:
+        list_ys.append(max(int_y1, int_y2 - int_tileSize))
+
+    if not list_xs:
+        list_xs = [int_x1]
+    if not list_ys:
+        list_ys = [int_y1]
+
+    for int_yy in list_ys:
+        for int_xx in list_xs:
+            int_tx1 = int_xx
+            int_ty1 = int_yy
+            int_tx2 = min(int_xx + int_tileSize, int_x2)
+            int_ty2 = min(int_yy + int_tileSize, int_y2)
+            list_tiles.append((int_tx1, int_ty1, int_tx2, int_ty2))
+    return list_tiles
+
+
+def enhance_image_texture(arr_tileGray: np.ndarray) -> np.ndarray:
+    """blob/edge 기반 후보점 추출을 위해 texture를 강화."""
+    obj_clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    arr_img = obj_clahe.apply(arr_tileGray)
+    arr_blur = cv2.GaussianBlur(arr_img, (3, 3), 0)
+
+    arr_kernelGrad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    arr_grad = cv2.morphologyEx(arr_blur, cv2.MORPH_GRADIENT, arr_kernelGrad)
+
+    arr_kernelBh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    arr_blackhat = cv2.morphologyEx(arr_blur, cv2.MORPH_BLACKHAT, arr_kernelBh)
+
+    arr_lap = cv2.Laplacian(arr_blur, cv2.CV_32F, ksize=3)
+    arr_lapAbs = normalize_image_to_uint8(np.abs(arr_lap))
+
+    arr_combined = cv2.addWeighted(arr_grad, 0.45, arr_blackhat, 0.35, 0)
+    arr_combined = cv2.addWeighted(arr_combined, 0.8, arr_lapAbs, 0.2, 0)
+    return normalize_image_to_uint8(arr_combined)
+
+
+def sample_interest_points(
+    arr_tileGray: np.ndarray,
+    int_maxPoints: int,
+    int_minDistance: int,
+    float_qualityLevel: float,
+) -> tp.List[tp.Tuple[int, int]]:
+    """타일 내에서 blob/edge 후보 위치를 샘플링."""
+    arr_enhanced = enhance_image_texture(arr_tileGray)
+    arr_corners = cv2.goodFeaturesToTrack(
+        arr_enhanced,
+        maxCorners=int_maxPoints * 4,
+        qualityLevel=float_qualityLevel,
+        minDistance=int_minDistance,
+        blockSize=5,
+        mask=None,
+        useHarrisDetector=False,
+    )
+
+    list_points = list()
+    if arr_corners is not None:
+        for arr_c in arr_corners[:, 0, :]:
+            int_x = int(round(arr_c[0]))
+            int_y = int(round(arr_c[1]))
+            list_points.append((int_x, int_y))
+
+    if len(list_points) < max(8, int_maxPoints // 2):
+        _, arr_th = cv2.threshold(arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_kernelOpen = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        arr_th = cv2.morphologyEx(arr_th, cv2.MORPH_OPEN, arr_kernelOpen)
+        list_cnts, _ = cv2.findContours(arr_th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for arr_cnt in sorted(list_cnts, key=cv2.contourArea, reverse=True):
+            float_area = float(cv2.contourArea(arr_cnt))
+            if float_area < 4.0 or float_area > 400.0:
+                continue
+            dict_m = cv2.moments(arr_cnt)
+            if abs(dict_m["m00"]) < 1e-6:
+                continue
+            int_x = int(round(dict_m["m10"] / dict_m["m00"]))
+            int_y = int(round(dict_m["m01"] / dict_m["m00"]))
+            list_points.append((int_x, int_y))
+            if len(list_points) >= int_maxPoints * 2:
+                break
+
+    list_kept = list()
+    for int_px, int_py in list_points:
+        bool_tooClose = False
+        for int_qx, int_qy in list_kept:
+            if (int_px - int_qx) ** 2 + (int_py - int_qy) ** 2 < int_minDistance ** 2:
+                bool_tooClose = True
+                break
+        if not bool_tooClose:
+            list_kept.append((int_px, int_py))
+        if len(list_kept) >= int_maxPoints:
+            break
+    return list_kept
+
+
+def calculate_binary_iou(arr_maskA: np.ndarray, arr_maskB: np.ndarray) -> float:
+    """두 이진 마스크 간 IoU 계산."""
+    int_inter = np.logical_and(arr_maskA > 0, arr_maskB > 0).sum()
+    int_union = np.logical_or(arr_maskA > 0, arr_maskB > 0).sum()
+    if int_union == 0:
+        return 0.0
+    return float(int_inter / int_union)
 
 
 class Sam2AspectRatioService:
@@ -277,45 +426,126 @@ class Sam2AspectRatioService:
         }
         return arr_roiBgr, dict_roi
 
-    def predict(
+    def predict_tiled_point_prompts(
         self,
         arr_inputBgr: np.ndarray,
-    ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray], tp.Optional[np.ndarray]]:
-        """SAM2 자동 세그멘테이션 수행."""
+    ) -> tp.Tuple[np.ndarray, tp.Optional[np.ndarray], tp.Dict[str, tp.Any]]:
+        """타일링 + blob/edge 후보점 기반 SAM2 point prompt 추론 수행."""
         if self.obj_model is None:
             self.initialize_model()
 
-        dict_predictKwargs: tp.Dict[str, tp.Any] = {
-            "source": arr_inputBgr,
+        int_roiHeight, int_roiWidth = arr_inputBgr.shape[:2]
+        arr_inputGray = cv2.cvtColor(arr_inputBgr, cv2.COLOR_BGR2GRAY)
+        list_tiles = create_processing_tiles(
+            0,
+            0,
+            int_roiWidth,
+            int_roiHeight,
+            int_tileSize=self.obj_config.int_tileSize,
+            int_stride=self.obj_config.int_stride,
+        )
+
+        dict_predictCommon: tp.Dict[str, tp.Any] = {
             "imgsz": self.obj_config.int_imgSize,
             "retina_masks": self.obj_config.bool_retinaMasks,
             "verbose": False,
         }
         if self.obj_config.str_device:
-            dict_predictKwargs["device"] = self.obj_config.str_device
+            dict_predictCommon["device"] = self.obj_config.str_device
 
-        list_results = self.obj_model(
-            **dict_predictKwargs)  # type: ignore[misc]
-        if not list_results:
-            raise RuntimeError("SAM2 결과가 비어 있습니다.")
+        list_keptMasks = list()
+        list_keptScores = list()
+        list_debugTiles = list()
+        list_debugPoints = list()
+        int_candidateCount = 0
+        int_acceptedCount = 0
 
-        obj_result = list_results[0]
+        for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
+            arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
+            arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
+            list_points = sample_interest_points(
+                arr_tileGray=arr_tileGray,
+                int_maxPoints=self.obj_config.int_pointsPerTile,
+                int_minDistance=self.obj_config.int_pointMinDistance,
+                float_qualityLevel=self.obj_config.float_pointQualityLevel,
+            )
+            list_debugTiles.append(
+                {
+                    "tile_index": int_tileIdx,
+                    "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
+                    "num_points": len(list_points),
+                }
+            )
+            for int_px, int_py in list_points:
+                int_candidateCount += 1
+                list_debugPoints.append(
+                    {
+                        "tile_index": int_tileIdx,
+                        "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
+                        "point_xy_tile": [int_px, int_py],
+                        "point_xy_roi": [int_tx1 + int_px, int_ty1 + int_py],
+                    }
+                )
+                list_results = self.obj_model(  # type: ignore[misc]
+                    source=arr_tileBgr,
+                    points=[[int_px, int_py]],
+                    labels=[1],
+                    **dict_predictCommon,
+                )
+                if not list_results:
+                    continue
 
-        arr_masks = np.empty((0, 0, 0), dtype=np.uint8)
-        if obj_result.masks is not None and obj_result.masks.data is not None:
-            arr_maskData = obj_result.masks.data.detach().cpu().numpy()
-            arr_masks = (
-                arr_maskData > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
+                obj_result = list_results[0]
+                if obj_result.masks is None or obj_result.masks.data is None:
+                    continue
 
-        arr_boxes = None
-        if obj_result.boxes is not None and obj_result.boxes.xyxy is not None:
-            arr_boxes = obj_result.boxes.xyxy.detach().cpu().numpy()
+                arr_tileMasks = obj_result.masks.data.detach().cpu().numpy()
+                arr_tileScores = None
+                if obj_result.boxes is not None and obj_result.boxes.conf is not None:
+                    arr_tileScores = obj_result.boxes.conf.detach().cpu().numpy()
 
+                for int_maskIdx, arr_tm in enumerate(arr_tileMasks):
+                    arr_tileMask = (arr_tm > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
+                    if int(arr_tileMask.sum()) < self.obj_config.int_minValidMaskArea:
+                        continue
+
+                    arr_roiMask = np.zeros((int_roiHeight, int_roiWidth), dtype=np.uint8)
+                    arr_roiMask[int_ty1:int_ty2, int_tx1:int_tx2] = arr_tileMask
+
+                    bool_isDup = False
+                    for arr_prevMask in list_keptMasks:
+                        if calculate_binary_iou(arr_prevMask, arr_roiMask) >= self.obj_config.float_dedupIou:
+                            bool_isDup = True
+                            break
+                    if bool_isDup:
+                        continue
+
+                    int_acceptedCount += 1
+                    list_keptMasks.append(arr_roiMask)
+                    if arr_tileScores is not None and int_maskIdx < len(arr_tileScores):
+                        list_keptScores.append(float(arr_tileScores[int_maskIdx]))
+                    else:
+                        list_keptScores.append(None)
+
+        arr_masks = (
+            np.stack(list_keptMasks, axis=0).astype(np.uint8)
+            if list_keptMasks
+            else np.empty((0, int_roiHeight, int_roiWidth), dtype=np.uint8)
+        )
         arr_scores = None
-        if obj_result.boxes is not None and obj_result.boxes.conf is not None:
-            arr_scores = obj_result.boxes.conf.detach().cpu().numpy()
-
-        return arr_masks, arr_boxes, arr_scores
+        if list_keptScores:
+            arr_scores = np.array(
+                [np.nan if x is None else float(x) for x in list_keptScores],
+                dtype=np.float32,
+            )
+        dict_debug = {
+            "num_tiles": len(list_tiles),
+            "num_candidate_points": int_candidateCount,
+            "num_accepted_masks": int_acceptedCount,
+            "tiles": list_debugTiles,
+            "candidate_points": list_debugPoints,
+        }
+        return arr_masks, arr_scores, dict_debug
 
     def refine_mask_for_area(self, arr_mask: np.ndarray) -> np.ndarray:
         """
@@ -542,6 +772,13 @@ class Sam2AspectRatioService:
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
             "bbox_edge_margin": int(self.obj_config.int_bboxEdgeMargin),
+            "tile_size": int(self.obj_config.int_tileSize),
+            "stride": int(self.obj_config.int_stride),
+            "points_per_tile": int(self.obj_config.int_pointsPerTile),
+            "point_min_distance": int(self.obj_config.int_pointMinDistance),
+            "point_quality_level": float(self.obj_config.float_pointQualityLevel),
+            "dedup_iou": float(self.obj_config.float_dedupIou),
+            "multimask_output_requested": bool(self.obj_config.bool_multimaskOutput),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "mask_binarize_threshold": float(self.obj_config.float_maskBinarizeThreshold),
             "min_valid_mask_area": int(self.obj_config.int_minValidMaskArea),
@@ -582,6 +819,7 @@ class Sam2AspectRatioService:
         list_masks: tp.List[np.ndarray],
         dict_summary: tp.Dict[str, tp.Any],
         dict_roi: tp.Dict[str, int],
+        dict_debug: tp.Dict[str, tp.Any],
     ) -> None:
         """이미지/CSV/JSON 결과 저장."""
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
@@ -635,6 +873,9 @@ class Sam2AspectRatioService:
             json.dump([asdict(obj_item) for obj_item in list_objects],
                       obj_f, ensure_ascii=False, indent=2)
 
+        with (self.obj_config.path_outputDir / "debug.json").open("w", encoding="utf-8") as obj_f:
+            json.dump(dict_debug, obj_f, ensure_ascii=False, indent=2)
+
         if not self.obj_config.bool_saveIndividualMasks:
             return
 
@@ -657,7 +898,7 @@ class Sam2AspectRatioService:
         """전체 파이프라인 실행."""
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
-        arr_masks, _, arr_scores = self.predict(arr_inputRoiBgr)
+        arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(arr_inputRoiBgr)
 
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
@@ -680,6 +921,9 @@ class Sam2AspectRatioService:
             arr_inputRoiBgr, list_objects, list_validMasks)
         dict_summary = self.build_summary(list_objects)
         dict_summary["roi"] = dict_roi
+        dict_summary["num_tiles"] = dict_debug.get("num_tiles")
+        dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
+        dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
         self.save_outputs(
             arr_inputBgr,
             arr_inputRoiBgr,
@@ -688,6 +932,7 @@ class Sam2AspectRatioService:
             list_validMasks,
             dict_summary,
             dict_roi,
+            dict_debug,
         )
 
         return Sam2AspectRatioResult(
@@ -816,6 +1061,12 @@ def build_batch_summary(
     }
 
 
+def build_default_output_dir_name() -> str:
+    """기본 output_dir 이름에 타임스탬프를 붙여 이전 결과 덮어쓰기를 방지."""
+    str_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"out_sam2_aspect_ratio_{str_timestamp}"
+
+
 def run_sam2_aspect_ratio(
     str_input: str,
     str_outputDir: str,
@@ -833,6 +1084,13 @@ def run_sam2_aspect_ratio(
     int_maskMorphOpenIterations: int = CONST_MASK_MORPH_OPEN_ITERATIONS,
     int_maskMorphCloseIterations: int = CONST_MASK_MORPH_CLOSE_ITERATIONS,
     int_imgSize: int = CONST_DEFAULT_IMAGE_SIZE,
+    int_tileSize: int = CONST_DEFAULT_TILE_SIZE,
+    int_stride: int = CONST_DEFAULT_TILE_STRIDE,
+    int_pointsPerTile: int = CONST_DEFAULT_POINTS_PER_TILE,
+    int_pointMinDistance: int = CONST_DEFAULT_POINT_MIN_DISTANCE,
+    float_pointQualityLevel: float = CONST_DEFAULT_POINT_QUALITY_LEVEL,
+    float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
+    bool_multimaskOutput: bool = CONST_DEFAULT_MULTIMASK_OUTPUT,
     str_device: tp.Optional[str] = None,
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
@@ -862,6 +1120,13 @@ def run_sam2_aspect_ratio(
             int_maskMorphOpenIterations=int_maskMorphOpenIterations,
             int_maskMorphCloseIterations=int_maskMorphCloseIterations,
             int_imgSize=int_imgSize,
+            int_tileSize=int_tileSize,
+            int_stride=int_stride,
+            int_pointsPerTile=int_pointsPerTile,
+            int_pointMinDistance=int_pointMinDistance,
+            float_pointQualityLevel=float_pointQualityLevel,
+            float_dedupIou=float_dedupIou,
+            bool_multimaskOutput=bool_multimaskOutput,
             str_device=str_device,
             bool_retinaMasks=bool_retinaMasks,
             bool_saveIndividualMasks=bool_saveIndividualMasks,
@@ -869,22 +1134,45 @@ def run_sam2_aspect_ratio(
 
     if not bool_isBatch:
         str_groupId, list_imagePaths = list_inputGroups[0]
+        print(
+            f"[single] processing image: {list_imagePaths[0].name}",
+            flush=True,
+        )
         obj_service = Sam2AspectRatioService(create_config(str_groupId, list_imagePaths[0]))
         obj_result = obj_service.process()
+        print(
+            f"[single] done: {list_imagePaths[0].name}",
+            flush=True,
+        )
         return obj_result.dict_summary
 
     path_outputRoot.mkdir(parents=True, exist_ok=True)
 
     str_firstGroupId, list_firstGroupImages = list_inputGroups[0]
+    print(
+        f"[batch] initialize model with first image: {list_firstGroupImages[0].name}",
+        flush=True,
+    )
     obj_sharedService = Sam2AspectRatioService(
         create_config(str_firstGroupId, list_firstGroupImages[0]))
     obj_sharedService.initialize_model()
 
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
-    for str_groupId, list_imagePaths in list_inputGroups:
+    int_numGroups = len(list_inputGroups)
+    for int_groupIndex, (str_groupId, list_imagePaths) in enumerate(list_inputGroups, start=1):
+        print(
+            f"[batch][group {int_groupIndex}/{int_numGroups}] IMG_ID={str_groupId} "
+            f"({len(list_imagePaths)} images)",
+            flush=True,
+        )
         list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
-        for path_image in list_imagePaths:
+        int_numImages = len(list_imagePaths)
+        for int_imageIndex, path_image in enumerate(list_imagePaths, start=1):
+            print(
+                f"  [image {int_imageIndex}/{int_numImages}] {path_image.name}",
+                flush=True,
+            )
             obj_service = Sam2AspectRatioService(create_config(str_groupId, path_image))
             obj_service.obj_model = obj_sharedService.obj_model
             obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
@@ -904,6 +1192,12 @@ def run_sam2_aspect_ratio(
         with (path_outputRoot / str_groupId / "img_id_summary.json").open("w", encoding="utf-8") as obj_f:
             json.dump(dict_groupSummary, obj_f, ensure_ascii=False, indent=2)
         list_groupSummaries.append(dict_groupSummary)
+        print(
+            f"[batch][group done] IMG_ID={str_groupId} "
+            f"mean_ar={dict_groupSummary.get('particle_aspect_ratio_mean')} "
+            f"mean_fragment_count={dict_groupSummary.get('fragment_count_mean_per_image')}",
+            flush=True,
+        )
 
     dict_batchSummary = build_batch_summary(
         path_input=path_input,
@@ -912,6 +1206,11 @@ def run_sam2_aspect_ratio(
     )
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json.dump(dict_batchSummary, obj_f, ensure_ascii=False, indent=2)
+    print(
+        f"[batch] done: num_img_ids={dict_batchSummary['num_img_ids']} "
+        f"num_images={dict_batchSummary['num_images']}",
+        flush=True,
+    )
     return dict_batchSummary
 
 
@@ -928,7 +1227,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     obj_parser.add_argument(
         "--output_dir",
-        default="out_sam2_aspect_ratio",
+        default=build_default_output_dir_name(),
         help="결과 저장 폴더",
     )
     obj_parser.add_argument(
@@ -938,7 +1237,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     obj_parser.add_argument(
         "--model",
-        default="model/sam2.1_hiera_tiny.pt",
+        default="model/sam2.1_hiera_base_plus.pt",
         help="SAM2 가중치 파일 경로",
     )
     obj_parser.add_argument(
@@ -1014,6 +1313,42 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="SAM2 추론 이미지 크기",
     )
     obj_parser.add_argument(
+        "--tile_size",
+        type=int,
+        default=CONST_DEFAULT_TILE_SIZE,
+        help="ROI 내부 타일 크기",
+    )
+    obj_parser.add_argument(
+        "--stride",
+        type=int,
+        default=CONST_DEFAULT_TILE_STRIDE,
+        help="타일 stride",
+    )
+    obj_parser.add_argument(
+        "--points_per_tile",
+        type=int,
+        default=CONST_DEFAULT_POINTS_PER_TILE,
+        help="각 타일에서 추출할 후보점 수",
+    )
+    obj_parser.add_argument(
+        "--point_min_distance",
+        type=int,
+        default=CONST_DEFAULT_POINT_MIN_DISTANCE,
+        help="후보점 최소 거리",
+    )
+    obj_parser.add_argument(
+        "--point_quality_level",
+        type=float,
+        default=CONST_DEFAULT_POINT_QUALITY_LEVEL,
+        help="goodFeaturesToTrack qualityLevel",
+    )
+    obj_parser.add_argument(
+        "--dedup_iou",
+        type=float,
+        default=CONST_DEFAULT_DEDUP_IOU,
+        help="타일/포인트 간 중복 마스크 제거 IoU threshold",
+    )
+    obj_parser.add_argument(
         "--device",
         default=None,
         help="예: cpu, cuda:0",
@@ -1023,6 +1358,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="retina mask 사용",
+    )
+    obj_parser.add_argument(
+        "--multimask_output",
+        action=argparse.BooleanOptionalAction,
+        default=CONST_DEFAULT_MULTIMASK_OUTPUT,
+        help="point prompt 당 여러 mask 후보를 받을지 여부",
     )
     obj_parser.add_argument(
         "--save_mask_imgs",
@@ -1056,6 +1397,13 @@ def main() -> None:
         int_maskMorphOpenIterations=obj_args.mask_morph_open_iterations,
         int_maskMorphCloseIterations=obj_args.mask_morph_close_iterations,
         int_imgSize=obj_args.imgsz,
+        int_tileSize=obj_args.tile_size,
+        int_stride=obj_args.stride,
+        int_pointsPerTile=obj_args.points_per_tile,
+        int_pointMinDistance=obj_args.point_min_distance,
+        float_pointQualityLevel=obj_args.point_quality_level,
+        float_dedupIou=obj_args.dedup_iou,
+        bool_multimaskOutput=obj_args.multimask_output,
         str_device=obj_args.device,
         bool_retinaMasks=obj_args.retina_masks,
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
