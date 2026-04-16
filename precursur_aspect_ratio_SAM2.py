@@ -351,7 +351,7 @@ def iter_chunks(
 
 
 def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
-    """particles.csv에서 각 particle의 평균 길이 (가로+세로)/2 를 읽어온다."""
+    """particles.csv에서 각 particle의 평균 길이 (um) 를 읽어온다."""
     if not path_particlesCsv.exists():
         return np.array([], dtype=np.float32)
 
@@ -360,8 +360,8 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
         obj_reader = csv.DictReader(obj_f)
         for dict_row in obj_reader:
             try:
-                float_horizontal = float(dict_row["int_longestHorizontal"])
-                float_vertical = float(dict_row["int_longestVertical"])
+                float_horizontal = float(dict_row["float_longestHorizontalUm"])
+                float_vertical = float(dict_row["float_longestVerticalUm"])
             except (KeyError, TypeError, ValueError):
                 continue
             list_meanSizes.append((float_horizontal + float_vertical) / 2.0)
@@ -371,12 +371,24 @@ def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
     return np.array(list_meanSizes, dtype=np.float32)
 
 
+def get_lot_number_from_input_path(path_inputImage: Path) -> str:
+    """입력 이미지 절대 경로에서 바로 위 directory 이름을 lot 번호로 추출한다."""
+    try:
+        path_resolved = path_inputImage.resolve()
+    except OSError:
+        path_resolved = path_inputImage
+    str_lotNumber = path_resolved.parent.name.strip()
+    return str_lotNumber if str_lotNumber else "UnknownLot"
+
+
 def save_particle_distribution_histogram(
     path_particlesCsv: Path,
     path_outputImage: Path,
+    path_inputImage: Path,
 ) -> None:
-    """particles.csv 기준 particle 평균 길이 분포 histogram 이미지를 저장한다."""
+    """particles.csv 기준 particle 평균 길이(um) 분포 histogram 이미지를 저장한다."""
     arr_meanSizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
+    str_lotNumber = get_lot_number_from_input_path(path_inputImage)
 
     int_imgWidth = 960
     int_imgHeight = 640
@@ -391,7 +403,7 @@ def save_particle_distribution_histogram(
 
     cv2.putText(
         arr_canvas,
-        "Particle Size Distribution",
+        str_lotNumber,
         (int_marginLeft, 35),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.9,
@@ -432,6 +444,7 @@ def save_particle_distribution_histogram(
     int_numBins = int(np.clip(np.sqrt(arr_meanSizes.size), 5, 20))
     float_minValue = float(np.min(arr_meanSizes))
     float_maxValue = float(np.max(arr_meanSizes))
+    float_meanValue = float(np.mean(arr_meanSizes))
     if abs(float_maxValue - float_minValue) < 1e-6:
         float_minValue -= 0.5
         float_maxValue += 0.5
@@ -487,6 +500,31 @@ def save_particle_distribution_histogram(
             cv2.LINE_AA,
         )
 
+    float_meanXRatio = (float_meanValue - float_minValue) / max(1e-6, float_maxValue - float_minValue)
+    int_meanX = int_marginLeft + int(round(float_meanXRatio * int_plotWidth))
+    int_meanX = int(np.clip(int_meanX, int_marginLeft, int_marginLeft + int_plotWidth))
+    tpl_meanColor = (0, 0, 255)
+    cv2.line(
+        arr_canvas,
+        (int_meanX, int_marginTop),
+        (int_meanX, int_marginTop + int_plotHeight),
+        tpl_meanColor,
+        2,
+    )
+    str_meanLabel = f"Mean: {float_meanValue:.2f} um"
+    int_meanLabelX = min(int_meanX + 8, int_marginLeft + int_plotWidth - 220)
+    int_meanLabelY = int_marginTop + 24
+    cv2.putText(
+        arr_canvas,
+        str_meanLabel,
+        (int_meanLabelX, int_meanLabelY),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        tpl_meanColor,
+        2,
+        cv2.LINE_AA,
+    )
+
     for int_tick in range(5):
         float_ratio = int_tick / 4.0
         int_tickY = int_marginTop + \
@@ -512,7 +550,7 @@ def save_particle_distribution_histogram(
 
     cv2.putText(
         arr_canvas,
-        "Mean of longest horizontal and vertical length (pixel)",
+        "Mean of longest horizontal and vertical length (um)",
         (int_marginLeft, int_imgHeight - 28),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.52,
@@ -1099,6 +1137,9 @@ class Sam2AspectRatioService:
             obj_item for obj_item in list_objects if obj_item.str_category == "particle"]
         list_fragments = [
             obj_item for obj_item in list_objects if obj_item.str_category == "fragment"]
+        int_totalObjects = len(list_objects)
+        int_particleCount = len(list_particles)
+        int_fragmentCount = len(list_fragments)
         list_particleArs = [
             obj_item.float_aspectRatioWH
             for obj_item in list_particles
@@ -1134,10 +1175,14 @@ class Sam2AspectRatioService:
             "mask_morph_kernel_size": int(self.obj_config.int_maskMorphKernelSize),
             "mask_morph_open_iterations": int(self.obj_config.int_maskMorphOpenIterations),
             "mask_morph_close_iterations": int(self.obj_config.int_maskMorphCloseIterations),
-            "num_total_objects": len(list_objects),
-            "num_particles": len(list_particles),
-            "num_fragments": len(list_fragments),
-            "fragment_count": len(list_fragments),
+            "num_total_objects": int_totalObjects,
+            "num_particles": int_particleCount,
+            "num_fragments": int_fragmentCount,
+            "fragment_count": int_fragmentCount,
+            "total_object_count": int_totalObjects,
+            "normal_particle_count": int_particleCount,
+            "fine_particle_count": int_fragmentCount,
+            "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
             "particle_aspect_ratio_mean": None,
             "particle_aspect_ratio_median": None,
             "particle_aspect_ratio_std": None,
@@ -1218,6 +1263,7 @@ class Sam2AspectRatioService:
         save_particle_distribution_histogram(
             path_particlesCsv=path_csvParticle,
             path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
+            path_inputImage=self.obj_config.path_input,
         )
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
@@ -1364,12 +1410,22 @@ def calculate_mean_from_optional_values(
     return float(np.mean(np.array(list_validValues, dtype=np.float32)))
 
 
+def calculate_percentage(int_part: int, int_total: int) -> float:
+    """part / total 비율을 퍼센트로 계산."""
+    if int_total <= 0:
+        return 0.0
+    return float((float(int_part) / float(int_total)) * 100.0)
+
+
 def build_img_id_summary(
     str_imgId: str,
     path_outputRoot: Path,
     list_fileSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
     """IMG_ID 폴더 단위 요약 생성."""
+    int_totalObjects = int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_fileSummaries))
+    int_particleCount = int(sum(dict_item.get("num_particles", 0) for dict_item in list_fileSummaries))
+    int_fragmentCount = int(sum(dict_item.get("num_fragments", 0) for dict_item in list_fileSummaries))
     float_meanAspectRatio = calculate_mean_from_optional_values(
         dict_item.get("particle_aspect_ratio_mean") for dict_item in list_fileSummaries
     )
@@ -1381,10 +1437,14 @@ def build_img_id_summary(
         "img_id": str_imgId,
         "output_dir": str(path_outputRoot / str_imgId),
         "num_images": len(list_fileSummaries),
-        "num_total_objects": int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_fileSummaries)),
-        "num_particles": int(sum(dict_item.get("num_particles", 0) for dict_item in list_fileSummaries)),
-        "num_fragments": int(sum(dict_item.get("num_fragments", 0) for dict_item in list_fileSummaries)),
+        "num_total_objects": int_totalObjects,
+        "num_particles": int_particleCount,
+        "num_fragments": int_fragmentCount,
         "fragment_count_total": int(sum(dict_item.get("fragment_count", 0) for dict_item in list_fileSummaries)),
+        "total_object_count": int_totalObjects,
+        "normal_particle_count": int_particleCount,
+        "fine_particle_count": int_fragmentCount,
+        "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
         "fragment_count_mean_per_image": float_meanFragmentCount,
         "particle_aspect_ratio_mean": float_meanAspectRatio,
         "files": list_fileSummaries,
@@ -1397,6 +1457,9 @@ def build_batch_summary(
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
     """디렉터리 입력용 통합 요약 생성."""
+    int_totalObjects = int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_groupSummaries))
+    int_particleCount = int(sum(dict_item.get("num_particles", 0) for dict_item in list_groupSummaries))
+    int_fragmentCount = int(sum(dict_item.get("num_fragments", 0) for dict_item in list_groupSummaries))
     float_meanAspectRatioByImgId = calculate_mean_from_optional_values(
         dict_item.get("particle_aspect_ratio_mean") for dict_item in list_groupSummaries
     )
@@ -1409,10 +1472,14 @@ def build_batch_summary(
         "output_dir": str(path_outputDir),
         "num_img_ids": len(list_groupSummaries),
         "num_images": int(sum(dict_item.get("num_images", 0) for dict_item in list_groupSummaries)),
-        "num_total_objects": int(sum(dict_item.get("num_total_objects", 0) for dict_item in list_groupSummaries)),
-        "num_particles": int(sum(dict_item.get("num_particles", 0) for dict_item in list_groupSummaries)),
-        "num_fragments": int(sum(dict_item.get("num_fragments", 0) for dict_item in list_groupSummaries)),
+        "num_total_objects": int_totalObjects,
+        "num_particles": int_particleCount,
+        "num_fragments": int_fragmentCount,
         "fragment_count_total": int(sum(dict_item.get("fragment_count_total", 0) for dict_item in list_groupSummaries)),
+        "total_object_count": int_totalObjects,
+        "normal_particle_count": int_particleCount,
+        "fine_particle_count": int_fragmentCount,
+        "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
         "fragment_count": float_meanFragmentCountByImgId,
         "fragment_count_mean_per_img_id": float_meanFragmentCountByImgId,
         "particle_aspect_ratio_mean": float_meanAspectRatioByImgId,
