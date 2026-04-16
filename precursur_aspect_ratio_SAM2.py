@@ -31,8 +31,11 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import matplotlib
 import numpy as np
 import yaml
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from ultralytics import SAM
 
 
@@ -401,187 +404,61 @@ def save_particle_distribution_histogram(
     """particles.csv 기준 particle 평균 길이(um) 분포 histogram 이미지를 저장한다."""
     arr_meanSizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
     str_lotNumber = get_lot_number_from_input_path(path_inputImage)
+    obj_fig, obj_ax = plt.subplots(figsize=(9.6, 6.4), dpi=100)
 
-    int_imgWidth = 960
-    int_imgHeight = 640
-    arr_canvas = np.full((int_imgHeight, int_imgWidth, 3), 255, dtype=np.uint8)
+    try:
+        obj_ax.set_title(str_lotNumber, fontsize=16)
+        obj_ax.set_ylabel("Count")
+        obj_ax.set_xlabel("Mean of longest horizontal and vertical length (um)")
 
-    int_marginLeft = 90
-    int_marginRight = 40
-    int_marginTop = 60
-    int_marginBottom = 90
-    int_plotWidth = int_imgWidth - int_marginLeft - int_marginRight
-    int_plotHeight = int_imgHeight - int_marginTop - int_marginBottom
+        if arr_meanSizes.size == 0:
+            obj_ax.text(
+                0.5,
+                0.5,
+                "No particle data in particles.csv",
+                ha="center",
+                va="center",
+                fontsize=13,
+                color="#666666",
+                transform=obj_ax.transAxes,
+            )
+            obj_ax.set_xticks([])
+            obj_ax.set_yticks([])
+        else:
+            int_numBins = int(np.clip(np.sqrt(arr_meanSizes.size), 5, 20))
+            float_minValue = float(np.min(arr_meanSizes))
+            float_maxValue = float(np.max(arr_meanSizes))
+            float_meanValue = float(np.mean(arr_meanSizes))
+            if abs(float_maxValue - float_minValue) < 1e-6:
+                float_minValue -= 0.5
+                float_maxValue += 0.5
 
-    cv2.putText(
-        arr_canvas,
-        str_lotNumber,
-        (int_marginLeft, 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.9,
-        (20, 20, 20),
-        2,
-        cv2.LINE_AA,
-    )
+            obj_ax.hist(
+                arr_meanSizes,
+                bins=int_numBins,
+                range=(float_minValue, float_maxValue),
+                color="#508cf0",
+                edgecolor="#323232",
+                linewidth=1.0,
+            )
 
-    cv2.line(
-        arr_canvas,
-        (int_marginLeft, int_marginTop + int_plotHeight),
-        (int_marginLeft + int_plotWidth, int_marginTop + int_plotHeight),
-        (0, 0, 0),
-        2,
-    )
-    cv2.line(
-        arr_canvas,
-        (int_marginLeft, int_marginTop),
-        (int_marginLeft, int_marginTop + int_plotHeight),
-        (0, 0, 0),
-        2,
-    )
+            obj_ax.axvline(float_meanValue, color="red", linewidth=2.0)
+            float_yMax = obj_ax.get_ylim()[1]
+            obj_ax.text(
+                float_meanValue,
+                float_yMax * 0.96,
+                f"Mean: {float_meanValue:.2f} um",
+                color="red",
+                fontsize=11,
+                ha="left",
+                va="top",
+            )
+            obj_ax.grid(axis="y", linestyle="--", alpha=0.25)
 
-    if arr_meanSizes.size == 0:
-        cv2.putText(
-            arr_canvas,
-            "No particle data in particles.csv",
-            (int_marginLeft + 110, int_marginTop + int_plotHeight // 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (80, 80, 80),
-            2,
-            cv2.LINE_AA,
-        )
-        cv2.imwrite(str(path_outputImage), arr_canvas)
-        return
-
-    int_numBins = int(np.clip(np.sqrt(arr_meanSizes.size), 5, 20))
-    float_minValue = float(np.min(arr_meanSizes))
-    float_maxValue = float(np.max(arr_meanSizes))
-    float_meanValue = float(np.mean(arr_meanSizes))
-    if abs(float_maxValue - float_minValue) < 1e-6:
-        float_minValue -= 0.5
-        float_maxValue += 0.5
-
-    arr_histCounts, arr_binEdges = np.histogram(
-        arr_meanSizes,
-        bins=int_numBins,
-        range=(float_minValue, float_maxValue),
-    )
-
-    int_maxCount = int(max(1, arr_histCounts.max()))
-    int_barGap = 6
-    int_barWidth = max(
-        8, int((int_plotWidth - int_barGap * (int_numBins - 1)) / max(1, int_numBins)))
-    tpl_barColor = (80, 140, 240)
-
-    for int_binIdx, int_count in enumerate(arr_histCounts):
-        int_x1 = int_marginLeft + int_binIdx * (int_barWidth + int_barGap)
-        int_x2 = min(int_x1 + int_barWidth, int_marginLeft + int_plotWidth)
-        int_barHeight = int(
-            round((int_count / int_maxCount) * (int_plotHeight - 20)))
-        int_y1 = int_marginTop + int_plotHeight - int_barHeight
-        int_y2 = int_marginTop + int_plotHeight
-
-        cv2.rectangle(arr_canvas, (int_x1, int_y1),
-                      (int_x2, int_y2), tpl_barColor, -1)
-        cv2.rectangle(arr_canvas, (int_x1, int_y1),
-                      (int_x2, int_y2), (50, 50, 50), 1)
-
-        str_countLabel = str(int_count)
-        cv2.putText(
-            arr_canvas,
-            str_countLabel,
-            (int_x1, max(int_marginTop + 15, int_y1 - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (40, 40, 40),
-            1,
-            cv2.LINE_AA,
-        )
-
-        float_binCenter = float(
-            (arr_binEdges[int_binIdx] + arr_binEdges[int_binIdx + 1]) / 2.0)
-        str_xLabel = f"{float_binCenter:.1f}"
-        cv2.putText(
-            arr_canvas,
-            str_xLabel,
-            (int_x1, int_marginTop + int_plotHeight + 24),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.38,
-            (40, 40, 40),
-            1,
-            cv2.LINE_AA,
-        )
-
-    float_meanXRatio = (float_meanValue - float_minValue) / max(1e-6, float_maxValue - float_minValue)
-    int_meanX = int_marginLeft + int(round(float_meanXRatio * int_plotWidth))
-    int_meanX = int(np.clip(int_meanX, int_marginLeft, int_marginLeft + int_plotWidth))
-    tpl_meanColor = (0, 0, 255)
-    cv2.line(
-        arr_canvas,
-        (int_meanX, int_marginTop),
-        (int_meanX, int_marginTop + int_plotHeight),
-        tpl_meanColor,
-        2,
-    )
-    str_meanLabel = f"Mean: {float_meanValue:.2f} um"
-    int_meanLabelX = min(int_meanX + 8, int_marginLeft + int_plotWidth - 220)
-    int_meanLabelY = int_marginTop + 24
-    cv2.putText(
-        arr_canvas,
-        str_meanLabel,
-        (int_meanLabelX, int_meanLabelY),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        tpl_meanColor,
-        2,
-        cv2.LINE_AA,
-    )
-
-    for int_tick in range(5):
-        float_ratio = int_tick / 4.0
-        int_tickY = int_marginTop + \
-            int(round((1.0 - float_ratio) * int_plotHeight))
-        int_tickValue = int(round(float_ratio * int_maxCount))
-        cv2.line(
-            arr_canvas,
-            (int_marginLeft - 8, int_tickY),
-            (int_marginLeft, int_tickY),
-            (0, 0, 0),
-            1,
-        )
-        cv2.putText(
-            arr_canvas,
-            str(int_tickValue),
-            (20, int_tickY + 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (40, 40, 40),
-            1,
-            cv2.LINE_AA,
-        )
-
-    cv2.putText(
-        arr_canvas,
-        "Mean of longest horizontal and vertical length (um)",
-        (int_marginLeft, int_imgHeight - 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.52,
-        (20, 20, 20),
-        1,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        arr_canvas,
-        "Count",
-        (18, int_marginTop - 14),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.52,
-        (20, 20, 20),
-        1,
-        cv2.LINE_AA,
-    )
-
-    cv2.imwrite(str(path_outputImage), arr_canvas)
+        obj_fig.tight_layout()
+        obj_fig.savefig(path_outputImage, bbox_inches="tight")
+    finally:
+        plt.close(obj_fig)
 
 
 class Sam2AspectRatioService:
