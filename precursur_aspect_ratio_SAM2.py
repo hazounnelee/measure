@@ -40,7 +40,7 @@ from ultralytics import SAM
 # Const / Tunable Hyperparameters
 # =========================================================
 # `particle` / `fragment` 분류 기준 면적
-CONST_PARTICLE_AREA_THRESHOLD: float = 100.0
+CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
 
 # ROI 가장자리와 가까운 bbox를 제외하기 위한 margin
 CONST_BBOX_EDGE_MARGIN: int = 8
@@ -50,7 +50,7 @@ CONST_TILE_EDGE_MARGIN: int = 8
 CONST_ROI_X_MIN: int = 0
 CONST_ROI_Y_MIN: int = 0
 CONST_ROI_X_MAX: int = 1024
-CONST_ROI_Y_MAX: int = 500
+CONST_ROI_Y_MAX: int = 768
 
 # SAM2 raw mask를 binary mask로 바꿀 때 사용하는 threshold
 # 현재 Ultralytics 출력에 맞춰 기존 동작과 동일하게 0.0을 기본값으로 둔다.
@@ -71,7 +71,7 @@ CONST_DEFAULT_RETINA_MASKS: bool = True
 CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS: bool = True
 CONST_DEFAULT_TILE_SIZE: int = 512
 CONST_DEFAULT_TILE_STRIDE: int = 256
-CONST_DEFAULT_POINTS_PER_TILE: int = 24
+CONST_DEFAULT_POINTS_PER_TILE: int = 80
 CONST_DEFAULT_POINT_MIN_DISTANCE: int = 14
 CONST_DEFAULT_POINT_QUALITY_LEVEL: float = 0.03
 CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
@@ -1764,4 +1764,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import time
+    start_time = time.time()
     main()
+    print(f"Elapsed time: {time.time() - start_time:.4f} seconds")
