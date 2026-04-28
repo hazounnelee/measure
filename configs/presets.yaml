@@ -1,0 +1,54 @@
+acicular:
+  20k:
+    scale_pixels: 276.0
+    scale_um: 50.0
+    particle_mode: acicular
+    measure_mode: lsd
+    auto_detect_sphere: true
+    sphere_cap_fraction: 0.65
+    auto_center_crop: true
+    center_crop_ratio: 0.60
+    tile_size: 192
+    stride: 96
+    points_per_tile: 120
+    point_min_distance: 8
+    area_threshold: 80.0
+  50k:
+    scale_pixels: 184.0
+    scale_um: 10.0
+    particle_mode: acicular
+    measure_mode: lsd
+    auto_detect_sphere: false
+    auto_center_crop: true
+    center_crop_ratio: 0.85
+    tile_size: 192
+    stride: 96
+    points_per_tile: 150
+    point_min_distance: 5
+    area_threshold: 20.0
+plate:
+  20k:
+    scale_pixels: 276.0
+    scale_um: 50.0
+    particle_mode: auto
+    auto_detect_sphere: true
+    sphere_cap_fraction: 0.65
+    auto_center_crop: true
+    center_crop_ratio: 0.60
+    tile_size: 192
+    stride: 96
+    points_per_tile: 100
+    point_min_distance: 10
+    area_threshold: 300.0
+  50k:
+    scale_pixels: 184.0
+    scale_um: 10.0
+    particle_mode: auto
+    auto_detect_sphere: false
+    auto_center_crop: true
+    center_crop_ratio: 0.85
+    tile_size: 192
+    stride: 96
+    points_per_tile: 100
+    point_min_distance: 8
+    area_threshold: 150.0
