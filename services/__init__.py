@@ -1,1 +1,1 @@
-
+from services.sam2_service import Sam2AspectRatioService
