@@ -775,43 +775,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 + np.array(tpl_c, dtype=np.float32) * 0.5
             ).astype(np.uint8)
 
-        # contour + bbox + label
+        # contour only
         for obj_m, arr_mask in zip(list_objects, list_masks):
             arr_contour = self.extract_largest_contour(arr_mask)
             if arr_contour is None:
                 continue
-
             tpl_ec = dict_edge.get(obj_m.str_category, (128, 128, 128))
             cv2.drawContours(arr_overlay, [arr_contour], -1, tpl_ec, 1)
-            cv2.rectangle(
-                arr_overlay,
-                (obj_m.int_bboxX, obj_m.int_bboxY),
-                (
-                    obj_m.int_bboxX + obj_m.int_bboxWidth,
-                    obj_m.int_bboxY + obj_m.int_bboxHeight,
-                ),
-                tpl_ec, 1,
-            )
-
-            int_lx = obj_m.int_bboxX
-            int_ly = max(14, obj_m.int_bboxY - 4)
-
-            if obj_m.str_category == "fragment":
-                str_label = f"F{obj_m.int_index} A={obj_m.int_maskArea}"
-            else:
-                str_prefix = "Ac" if obj_m.str_category == "acicular" else "Pl"
-                str_label = (
-                    f"{str_prefix}{obj_m.int_index} "
-                    f"t={obj_m.float_thicknessUm:.2f}um "
-                    f"AR={obj_m.float_aspectRatio:.2f}"
-                )
-
-            cv2.putText(
-                arr_overlay, str_label,
-                (int_lx, int_ly),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.38,
-                tpl_ec, 1, cv2.LINE_AA,
-            )
 
         return arr_overlay
 
