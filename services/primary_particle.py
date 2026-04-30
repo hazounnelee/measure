@@ -23,6 +23,7 @@ from configs import get_analysis_preset
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
+from utils.contour import fuse_contours
 from utils.io import collect_input_groups, build_image_output_dir
 from services.sam2_service import Sam2AspectRatioService
 
@@ -749,6 +750,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         arr_imageBgr: np.ndarray,
         list_objects: tp.List[PrimaryParticleMeasurement],
         list_masks: tp.List[np.ndarray],
+        float_density: tp.Optional[float] = None,
     ) -> np.ndarray:
         """침상(파랑)/판상(초록)/fragment(주황) 색으로 overlay를 생성한다."""
         # BGR 색상 (mask fill / contour+label)
@@ -793,6 +795,35 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     tpl_ec,
                     list_placedRects,
                 )
+
+        # --- 하단 통계 바 ---
+        list_t = [o.float_thicknessUm for o in list_objects if o.str_category in ("acicular", "plate")]
+        int_count = len(list_t)
+        str_stats = (
+            f"N={int_count}"
+            f"  mean={np.mean(list_t):.3f}um" if list_t else f"N={int_count}"
+        )
+        if list_t:
+            str_stats = (
+                f"N={int_count}"
+                f"  mean={np.mean(list_t):.3f}um"
+                f"  median={float(np.median(list_t)):.3f}um"
+                f"  std={float(np.std(list_t)):.3f}um"
+            )
+        if float_density is not None:
+            str_stats += f"  density={float_density:.3f}"
+
+        int_ow = arr_overlay.shape[1]
+        float_scale = int_ow / 1800.0
+        int_font = cv2.FONT_HERSHEY_SIMPLEX
+        int_thickness_txt = max(1, int(round(float_scale * 1.5)))
+        (int_tw, int_th), int_bl = cv2.getTextSize(str_stats, int_font, float_scale, int_thickness_txt)
+        int_bar_h = int_th + int_bl + int(16 * float_scale)
+        arr_bar = np.zeros((int_bar_h, int_ow, 3), dtype=np.uint8)
+        int_ty = int_th + int(8 * float_scale)
+        cv2.putText(arr_bar, str_stats, (int(8 * float_scale), int_ty),
+                    int_font, float_scale, (220, 220, 220), int_thickness_txt, cv2.LINE_AA)
+        arr_overlay = np.vstack([arr_overlay, arr_bar])
 
         return arr_overlay
 
@@ -1058,6 +1089,17 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 int_min_length_px=self.obj_primary_config.int_lsdMinLengthPx,
             )
 
+            if self.obj_primary_config.bool_fuseContours and list_objects:
+                int_before = len(list_objects)
+                list_objects, list_validMasks = fuse_contours(
+                    list_objects, list_validMasks,
+                    float_acicular_threshold=self.obj_primary_config.float_acicularThreshold,
+                    str_particle_type=self.obj_primary_config.str_particleType,
+                    float_scale_pixels=self.obj_config.float_scalePixels,
+                    float_scale_um=self.obj_config.float_scaleMicrometers,
+                )
+                print(f"[fuse] {int_before}개 → {len(list_objects)}개", flush=True)
+
             int_primaryCount = sum(
                 1 for o in list_objects if o.str_category in ("acicular", "plate"))
             if int_primaryCount < self.obj_primary_config.int_targetParticleCount:
@@ -1067,7 +1109,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     flush=True,
                 )
 
-            arr_overlay = self.create_primary_overlay(arr_inputRoiBgr, list_objects, list_validMasks)
+            arr_overlay = self.create_primary_overlay(arr_inputRoiBgr, list_objects, list_validMasks, float_density=float_roiDensity)
             dict_summary = self.build_primary_summary(list_objects)
             dict_summary["roi"] = dict_roi
             dict_summary["measure_mode"] = "lsd"
@@ -1125,6 +1167,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_summary = self.build_primary_summary(list_objects)
         arr_roiGray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         _, arr_roiBinary = cv2.threshold(arr_roiGray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
         dict_summary["roi"] = dict_roi
         dict_summary["measure_mode"] = "sam2"
         dict_summary["particle_mode"] = self.obj_primary_config.str_particleMode
@@ -1201,9 +1244,9 @@ class PrimaryParticleService(Sam2AspectRatioService):
         str_magnification: str,
         str_measureMode: str,
         bool_lsdAdaptiveThresh: bool,
-        bool_lsdFuseSegments: bool,
         bool_arScreen: bool,
         int_lsdMinLengthPx: int,
+        bool_fuseContours: bool,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1250,9 +1293,9 @@ class PrimaryParticleService(Sam2AspectRatioService):
             str_magnification=str_magnification,
             str_measureMode=str_measureMode,
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
-            bool_lsdFuseSegments=bool_lsdFuseSegments,
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
+            bool_fuseContours=bool_fuseContours,
         )
 
 
@@ -1389,9 +1432,9 @@ def run_primary_particle_analysis(
     str_magnification: str = "unknown",
     str_measureMode: str = "sam2",
     bool_lsdAdaptiveThresh: bool = False,
-    bool_lsdFuseSegments: bool = True,
     bool_arScreen: bool = False,
     int_lsdMinLengthPx: int = 20,
+    bool_fuseContours: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1459,9 +1502,9 @@ def run_primary_particle_analysis(
             str_magnification=str_magnification,
             str_measureMode=str_measureMode,
             bool_lsdAdaptiveThresh=bool_lsdAdaptiveThresh,
-            bool_lsdFuseSegments=bool_lsdFuseSegments,
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
+            bool_fuseContours=bool_fuseContours,
         )
 
     # 단일 이미지
@@ -1723,6 +1766,11 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
 
     # LSD 전처리 / 후처리 옵션
     obj_parser.add_argument(
+        "--fuse",
+        action=argparse.BooleanOptionalAction, default=False,
+        help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 10°, 겹침 ≥ 40%%). 기본값: OFF.",
+    )
+    obj_parser.add_argument(
         "--min_length", type=int, default=20,
         help="LSD 선분 최소 길이 (px). 이 값보다 짧은 선분은 무시된다. 기본값: 20.",
     )
@@ -1732,14 +1780,6 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help=(
             "LSD 전처리에서 전역 Otsu 대신 지역 Adaptive(Gaussian) threshold를 사용한다. "
             "명암 불균일 이미지에서 엣지 검출 품질을 높인다."
-        ),
-    )
-    obj_parser.add_argument(
-        "--lsd_fuse_segments",
-        action=argparse.BooleanOptionalAction, default=True,
-        help=(
-            "유사 방향(≤10°)이고 겹치거나 인접한 LSD 선분을 하나로 융합한다. "
-            "단일 침상이 여러 조각으로 검출될 때 장축 길이를 올바르게 측정한다."
         ),
     )
     obj_parser.add_argument(
