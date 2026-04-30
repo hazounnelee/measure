@@ -13,8 +13,7 @@ CONST_LSD_DEDUP_ANGLE_DEG: float = 25.0
 CONST_LSD_PERP_N_SAMPLES: int = 7
 
 CONST_LSD_FUSE_ANGLE_DEG: float = 10.0
-CONST_LSD_FUSE_PERP_PX: float = 8.0
-CONST_LSD_FUSE_GAP_PX: float = 15.0
+CONST_LSD_FUSE_OVERLAP_RATIO: float = 0.3   # intersection / min(area_i, area_j)
 
 
 def measure_perpendicular_thickness(
@@ -101,23 +100,37 @@ def _is_bbox_near_edge(
     )
 
 
-def _fuse_segments(
+def _bbox_corners(dict_cand: tp.Dict[str, float]) -> np.ndarray:
+    """Return 4 corners of the oriented bounding box for a line segment candidate."""
+    float_cx = (dict_cand["x1"] + dict_cand["x2"]) / 2.0
+    float_cy = (dict_cand["y1"] + dict_cand["y2"]) / 2.0
+    float_length = max(dict_cand["length"], 1.0)
+    float_width = max(dict_cand.get("width", 3.0), 3.0)
+    # cv2.boxPoints expects angle in OpenCV convention (clockwise from x-axis)
+    float_angle_cv = -dict_cand["angle"]
+    return cv2.boxPoints(((float_cx, float_cy), (float_length, float_width), float_angle_cv)).astype(np.float32)
+
+
+def _fuse_contour_boxes(
     list_cands: tp.List[tp.Dict[str, float]],
     float_angle_tol_deg: float,
-    float_perp_tol_px: float,
-    float_gap_tol_px: float,
+    float_overlap_ratio: float,
 ) -> tp.List[tp.Dict[str, float]]:
-    """Fuse overlapping near-collinear segments using union-find.
+    """Fuse oriented bounding boxes using union-find.
 
-    Two segments are fused when they satisfy all three conditions:
+    Two boxes are fused when:
       1. Angle difference < float_angle_tol_deg (mod 180°)
-      2. Perpendicular distance between midpoints < float_perp_tol_px
-      3. Their extents projected onto the shared axis overlap or the gap
-         between them is < float_gap_tol_px
+      2. intersection_area / min(area_i, area_j) >= float_overlap_ratio
     """
     n = len(list_cands)
     if n <= 1:
         return list(list_cands)
+
+    list_corners = [_bbox_corners(c) for c in list_cands]
+    list_areas = [
+        max(c["length"], 1.0) * max(c.get("width", 3.0), 3.0)
+        for c in list_cands
+    ]
 
     parent = list(range(n))
 
@@ -129,14 +142,6 @@ def _fuse_segments(
 
     for i in range(n):
         ci = list_cands[i]
-        float_ilen = ci["length"]
-        if float_ilen < 1.0:
-            continue
-        float_iux = (ci["x2"] - ci["x1"]) / float_ilen
-        float_iuy = (ci["y2"] - ci["y1"]) / float_ilen
-        float_imx = (ci["x1"] + ci["x2"]) / 2.0
-        float_imy = (ci["y1"] + ci["y2"]) / 2.0
-
         for j in range(i + 1, n):
             cj = list_cands[j]
 
@@ -146,32 +151,24 @@ def _fuse_segments(
             if float_adiff > float_angle_tol_deg:
                 continue
 
-            # 2. Perpendicular distance between midpoints
-            float_dmx = (cj["x1"] + cj["x2"]) / 2.0 - float_imx
-            float_dmy = (cj["y1"] + cj["y2"]) / 2.0 - float_imy
-            float_perp = abs(-float_iuy * float_dmx + float_iux * float_dmy)
-            if float_perp > float_perp_tol_px:
+            # 2. Bbox overlap
+            _ret, arr_inter = cv2.intersectConvexConvex(list_corners[i], list_corners[j])
+            if arr_inter is None or len(arr_inter) == 0:
                 continue
-
-            # 3. Axial overlap: project j's endpoints onto i's axis
-            float_tj1 = (cj["x1"] - ci["x1"]) * float_iux + (cj["y1"] - ci["y1"]) * float_iuy
-            float_tj2 = (cj["x2"] - ci["x1"]) * float_iux + (cj["y2"] - ci["y1"]) * float_iuy
-            float_jmin = min(float_tj1, float_tj2)
-            float_jmax = max(float_tj1, float_tj2)
-            if float_jmax < -float_gap_tol_px or float_jmin > float_ilen + float_gap_tol_px:
+            float_area_inter = float(cv2.contourArea(arr_inter))
+            if float_area_inter <= 0.0:
+                continue
+            if float_area_inter / max(min(list_areas[i], list_areas[j]), 1.0) < float_overlap_ratio:
                 continue
 
             pi, pj = _find(i), _find(j)
             if pi != pj:
                 parent[pi] = pj
 
-    # Group indices by root
     groups: tp.Dict[int, tp.List[int]] = {}
     for i in range(n):
         root = _find(i)
-        if root not in groups:
-            groups[root] = []
-        groups[root].append(i)
+        groups.setdefault(root, []).append(i)
 
     list_fused: tp.List[tp.Dict[str, float]] = []
     for list_idx in groups.values():
@@ -179,14 +176,13 @@ def _fuse_segments(
             list_fused.append(list_cands[list_idx[0]])
             continue
 
-        # Principal direction: length-weighted average, sign-aligned to first segment
+        # Principal direction: length-weighted average, sign-aligned to first
         c0 = list_cands[list_idx[0]]
         float_l0 = max(c0["length"], 1.0)
         float_ux_ref = (c0["x2"] - c0["x1"]) / float_l0
         float_uy_ref = (c0["y2"] - c0["y1"]) / float_l0
 
-        float_sum_ux = 0.0
-        float_sum_uy = 0.0
+        float_sum_ux, float_sum_uy = 0.0, 0.0
         for k in list_idx:
             ck = list_cands[k]
             float_l = max(ck["length"], 1.0)
@@ -204,7 +200,6 @@ def _fuse_segments(
         float_fux = float_sum_ux / float_norm
         float_fuy = float_sum_uy / float_norm
 
-        # Reference point: centroid of all endpoints
         float_ref_x = sum(
             (list_cands[k]["x1"] + list_cands[k]["x2"]) / 2.0 for k in list_idx
         ) / len(list_idx)
@@ -212,19 +207,14 @@ def _fuse_segments(
             (list_cands[k]["y1"] + list_cands[k]["y2"]) / 2.0 for k in list_idx
         ) / len(list_idx)
 
-        # Project all endpoints onto principal axis; take extremes
+        # Project all 4 corners of each bbox onto principal axis; take extremes
         float_t_min = float("inf")
         float_t_max = float("-inf")
         for k in list_idx:
-            for float_ex, float_ey in (
-                (list_cands[k]["x1"], list_cands[k]["y1"]),
-                (list_cands[k]["x2"], list_cands[k]["y2"]),
-            ):
+            for float_ex, float_ey in list_corners[k]:
                 float_t = (float_ex - float_ref_x) * float_fux + (float_ey - float_ref_y) * float_fuy
-                if float_t < float_t_min:
-                    float_t_min = float_t
-                if float_t > float_t_max:
-                    float_t_max = float_t
+                float_t_min = min(float_t_min, float_t)
+                float_t_max = max(float_t_max, float_t)
 
         float_nx1 = float_ref_x + float_t_min * float_fux
         float_ny1 = float_ref_y + float_t_min * float_fuy
@@ -234,11 +224,13 @@ def _fuse_segments(
         float_new_angle = float(
             np.degrees(np.arctan2(float_ny2 - float_ny1, float_nx2 - float_nx1)) % 180
         )
+        float_avg_width = sum(list_cands[k].get("width", 3.0) for k in list_idx) / len(list_idx)
         list_fused.append({
             "x1": float_nx1, "y1": float_ny1,
             "x2": float_nx2, "y2": float_ny2,
             "length": float_new_len,
             "angle": float_new_angle,
+            "width": float_avg_width,
         })
 
     return list_fused
@@ -275,8 +267,9 @@ def detect_acicular_lsd(
         float_area_threshold: Minimum mask area in pixels²; smaller masks are dropped.
         bool_adaptive_thresh: Use adaptive (Gaussian) threshold instead of Otsu for
             both the step-2 visualization and the perpendicular profile scan.
-        bool_fuse_segments: Fuse overlapping, near-collinear LSD segments before
-            measurement.  Produces an extra lsd_06_after_fusion debug image.
+        bool_fuse_segments: Fuse oriented bounding boxes that have similar direction
+            (Δangle < 10°) and significant overlap (intersection/min_area ≥ 0.3).
+            Produces an extra lsd_06_after_fusion debug image.
 
     Returns:
         (list_measurements, list_masks, arr_debug_bgr, dict_step_images)
@@ -346,7 +339,7 @@ def detect_acicular_lsd(
         float_angle = float(np.degrees(np.arctan2(float_y2 - float_y1, float_x2 - float_x1)) % 180)
         list_cands.append({
             "x1": float_x1, "y1": float_y1, "x2": float_x2, "y2": float_y2,
-            "length": float_len, "angle": float_angle,
+            "length": float_len, "angle": float_angle, "width": float_lsd_w,
         })
 
     # step 4: after length/AR filter (cyan)
@@ -385,14 +378,13 @@ def detect_acicular_lsd(
                  (0, 165, 255), 1)
     dict_steps["lsd_05_after_dedup"] = arr_step_deduped
 
-    # --- optional segment fusion ---
+    # --- optional contour box fusion ---
     int_before_fuse = len(list_accepted)
     if bool_fuse_segments and list_accepted:
-        list_accepted = _fuse_segments(
+        list_accepted = _fuse_contour_boxes(
             list_accepted,
             float_angle_tol_deg=CONST_LSD_FUSE_ANGLE_DEG,
-            float_perp_tol_px=CONST_LSD_FUSE_PERP_PX,
-            float_gap_tol_px=CONST_LSD_FUSE_GAP_PX,
+            float_overlap_ratio=CONST_LSD_FUSE_OVERLAP_RATIO,
         )
         list_accepted.sort(key=lambda d: d["length"], reverse=True)
 

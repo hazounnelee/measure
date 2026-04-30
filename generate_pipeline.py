@@ -194,9 +194,9 @@ def draw_primary():
     y -= 1.3
     box(ax, LX, y, CW, 1.05,
         "CONTOUR FUSION  (--lsd_fuse_segments, ON by default)\n"
-        "union-find over oriented bounding boxes (connected components):\n"
-        "  similar direction  (Δangle < 10°)  AND  significant bbox overlap\n"
-        "→ merge similarly-directed, heavily-overlapping contours into one",
+        "union-find over oriented bounding boxes of each LSD segment:\n"
+        "  Δangle < 10°  AND  intersection / min(area_i, area_j)  ≥  0.3\n"
+        "→ merge overlapping, similarly-directed boxes → one fused segment",
         color=C_LSD, fs=7.2, alpha=0.88); larr(y - 0.53, y - 1.18)
 
     y -= 1.48
