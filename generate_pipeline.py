@@ -113,13 +113,10 @@ def draw_primary():
     sep(24.9)
 
     # ── ROI extraction ─────────────────────────────────────────────────────────
-    box(ax, XC, 24.4, BW, 1.3,
-        "ROI EXTRACTION\n"
-        "20k  auto_detect_sphere=True  →  Gaussian blur → Otsu → morphology\n"
-        "     → largest contour → min-enclosing circle → cap ROI  (top cap_fraction × diam)\n"
-        "     fallback: center crop\n"
-        "50k  center crop  (crop_ratio = 0.85)\n"
-        "manual  explicit  --roi_x_min/y_min/x_max/y_max",
+    box(ax, XC, 24.4, BW, 1.05,
+        "ROI EXTRACTION  (auto_detect_sphere=False, default)\n"
+        "center crop  (crop_ratio = 0.60)   —   applies to both 20k and 50k\n"
+        "manual override:  --roi_x_min/y_min/x_max/y_max",
         color=C_PREP, fs=7.5)
     arr(ax, XC, 23.75, XC, 23.2)
     sep(22.95)
@@ -184,7 +181,7 @@ def draw_primary():
     box(ax, LX, y, CW, CH,
         "SEGMENT FILTER\n"
         "length  ≥  20 px\n"
-        "lsd_width / length  <  AR_loose  (= min(thresh+0.20, 0.65))",
+        "--ar_screen OFF (default)  →  AR filter skipped  (all segments pass)",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
 
     y -= 1.3
@@ -196,7 +193,7 @@ def draw_primary():
 
     y -= 1.3
     box(ax, LX, y, CW, 1.05,
-        "SEGMENT FUSION  (--lsd_fuse_segments, optional)\n"
+        "SEGMENT FUSION  (--lsd_fuse_segments, ON by default)\n"
         "union-find over collinear neighbours:\n"
         "  Δangle < 10°  ·  perp-dist < 8 px  ·  axial gap < 15 px\n"
         "merge: length-weighted axis + extreme endpoint projection",
@@ -354,7 +351,7 @@ def draw_secondary():
     ax.text(XC, 21.3, "secondary_measure.py — Full Pipeline",
             ha="center", fontsize=14, fontweight="bold", color="#1E293B")
     ax.text(XC, 20.75, "Segment-Anything SAM2  →  particle / fragment classification\n"
-            "aspect ratio  ·  sphericity  ·  size (µm)",
+            "equivalent circle diameter  ·  sphericity  (µm)",
             ha="center", fontsize=8.5, color="#475569", multialignment="center")
 
     # Input
@@ -436,13 +433,11 @@ def draw_secondary():
     dn(5.05, 4.5); sep(4.3)
 
     # Measurement
-    box(ax, XC, 3.85, BW, 1.2,
+    box(ax, XC, 3.85, BW, 1.05,
         "MEASUREMENT\n"
-        "longest horizontal span  =  max contiguous foreground run per row\n"
-        "longest vertical span   =  max contiguous foreground run per column\n"
-        "aspect_ratio  =  min(H, V) / max(H, V)   (1.0 = circle)\n"
-        "sphericity    =  4π × mask_area / perimeter²   (Wadell 2D isoperimetric ratio)\n"
-        "size_um       =  (longestH_um + longestV_um) / 2",
+        "eq_diameter_um  =  2 × √(mask_area / π)   →   px → µm  (Equivalent Circle Diameter)\n"
+        "sphericity      =  4π × mask_area / perimeter²   (Wadell 2D isoperimetric ratio)\n"
+        "--eq_diameter ON (default): size = eq_diameter   |   OFF: size = (spanH + spanV) / 2",
         color=C_MEAS, fs=8)
     dn(3.25, 2.75)
 
