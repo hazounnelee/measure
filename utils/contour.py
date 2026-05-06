@@ -41,11 +41,20 @@ def fuse_contours(
             i = parent[i]
         return i
 
+    list_bboxes = [
+        (o.int_bboxX, o.int_bboxY, o.int_bboxX + o.int_bboxWidth, o.int_bboxY + o.int_bboxHeight)
+        for o in list_objects
+    ]
+
     for i in range(n):
         for j in range(i + 1, n):
             float_adiff = abs(list_objects[i].float_minRectAngle - list_objects[j].float_minRectAngle)
             float_adiff = min(float_adiff, 180.0 - float_adiff)
             if float_adiff > float_angle_tol_deg:
+                continue
+            ax1, ay1, ax2, ay2 = list_bboxes[i]
+            bx1, by1, bx2, by2 = list_bboxes[j]
+            if ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1:
                 continue
             float_inter = float((list_masks[i] & list_masks[j]).sum())
             if float_inter <= 0.0:
