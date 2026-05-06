@@ -827,7 +827,6 @@ class Sam2AspectRatioService:
             "model_weights_path": str(self.obj_config.path_modelWeights),
             "model_weights_resolved_name": self.resolve_model_weights_path().name,
             "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
-            "small_particle": bool(self.obj_config.bool_smallParticle),
             "scale_pixels": float(self.obj_config.float_scalePixels),
             "scale_micrometers": float(self.obj_config.float_scaleMicrometers),
             "micrometers_per_pixel": float(float_micrometersPerPixel),
@@ -1035,12 +1034,77 @@ class Sam2AspectRatioService:
             cv2.imwrite(str(path_targetDir / str_fileName),
                         arr_mask.astype(np.uint8) * 255)
 
+    def process_opencv(self) -> Sam2AspectRatioResult:
+        """OpenCV CLAHE+Otsu 기반 빠른 세그멘테이션 파이프라인."""
+        arr_inputBgr = self.load_image_bgr()
+        arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
+
+        arr_gray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        obj_clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        arr_clahe = obj_clahe.apply(arr_gray)
+        _, arr_binary = cv2.threshold(arr_clahe, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        int_k = self.obj_config.int_maskMorphKernelSize
+        if int_k > 1:
+            arr_kernel = np.ones((int_k, int_k), dtype=np.uint8)
+            if self.obj_config.int_maskMorphOpenIterations > 0:
+                arr_binary = cv2.morphologyEx(
+                    arr_binary, cv2.MORPH_OPEN, arr_kernel,
+                    iterations=self.obj_config.int_maskMorphOpenIterations)
+            if self.obj_config.int_maskMorphCloseIterations > 0:
+                arr_binary = cv2.morphologyEx(
+                    arr_binary, cv2.MORPH_CLOSE, arr_kernel,
+                    iterations=self.obj_config.int_maskMorphCloseIterations)
+
+        int_numLabels, arr_labels, _, _ = cv2.connectedComponentsWithStats(arr_binary)
+
+        list_objects: tp.List[ObjectMeasurement] = []
+        list_validMasks: tp.List[np.ndarray] = []
+        list_rawMasks: tp.List[np.ndarray] = []
+        int_index = 0
+        for int_label in range(1, int_numLabels):
+            arr_mask = (arr_labels == int_label).astype(np.uint8)
+            list_rawMasks.append(arr_mask)
+            obj_measurement = self.measure_mask(arr_mask, int_index=int_index, float_confidence=None)
+            if obj_measurement is None:
+                continue
+            list_objects.append(obj_measurement)
+            list_validMasks.append(self.refine_mask_for_area(arr_mask).astype(np.uint8))
+            int_index += 1
+
+        int_h_roi, int_w_roi = arr_inputRoiBgr.shape[:2]
+        arr_raw_masks = (
+            np.stack(list_rawMasks, axis=0)
+            if list_rawMasks
+            else np.empty((0, int_h_roi, int_w_roi), dtype=np.uint8)
+        )
+        arr_overlay = self.create_overlay(arr_inputRoiBgr, list_objects, list_validMasks)
+        dict_summary = self.build_summary(list_objects)
+        dict_summary["roi"] = dict_roi
+        dict_summary["measure_mode"] = "opencv"
+        dict_debug: tp.Dict[str, tp.Any] = {
+            "measure_mode": "opencv",
+            "num_components": int_numLabels - 1,
+        }
+        self.save_outputs(
+            arr_inputBgr, arr_inputRoiBgr, arr_overlay,
+            list_objects, list_validMasks, dict_summary, dict_roi, dict_debug,
+            arr_raw_masks=arr_raw_masks,
+        )
+        self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_clahe.png"), arr_clahe)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_binary.png"), arr_binary)
+        return Sam2AspectRatioResult(list_objects=list_objects, dict_summary=dict_summary)
+
     def process(self) -> Sam2AspectRatioResult:
         """단일 이미지에 대한 전체 파이프라인을 실행한다.
 
         Returns:
             측정 결과 리스트와 summary dict를 포함하는 `Sam2AspectRatioResult`.
         """
+        if self.obj_config.bool_useOpenCV:
+            return self.process_opencv()
+
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
         arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(

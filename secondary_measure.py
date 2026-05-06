@@ -86,6 +86,7 @@ def main() -> None:
         bool_useEqDiameter=obj_args.eq_diameter,
         int_preprocessWidth=obj_args.preprocess_width,
         int_numGpus=obj_args.num_gpus,
+        bool_useOpenCV=obj_args.opencv,
     )
 
     print("===== 2차 입자 분석 결과 요약 =====")

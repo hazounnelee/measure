@@ -201,6 +201,7 @@ def run_secondary_particle_analysis(
     bool_useEqDiameter: bool = True,
     int_preprocessWidth: int = 1024,
     int_numGpus: int = 1,
+    bool_useOpenCV: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
     path_input = Path(str_input)
@@ -249,6 +250,7 @@ def run_secondary_particle_analysis(
             bool_saveIndividualMasks=bool_saveIndividualMasks,
             bool_useEqDiameter=bool_useEqDiameter,
             int_preprocessWidth=int_preprocessWidth,
+            bool_useOpenCV=bool_useOpenCV,
         )
 
     if not bool_isBatch:
@@ -272,7 +274,7 @@ def run_secondary_particle_analysis(
     if not list_devices:
         list_devices = [str_device]  # 단일 디바이스 (None 포함)
 
-    # 디바이스별 모델 초기화
+    # 디바이스별 모델 초기화 (OpenCV 모드에서는 생략)
     str_firstGroupId, list_firstImages = list_inputGroups[0]
     list_gpu_services: tp.List[Sam2AspectRatioService] = []
     for str_dev in list_devices:
@@ -281,8 +283,9 @@ def run_secondary_particle_analysis(
             str_device=str_dev,
         )
         obj_svc = Sam2AspectRatioService(cfg_dev)
-        print(f"[batch] init model on {str_dev or 'auto'}: {list_firstImages[0].name}", flush=True)
-        obj_svc.initialize_model()
+        if not bool_useOpenCV:
+            print(f"[batch] init model on {str_dev or 'auto'}: {list_firstImages[0].name}", flush=True)
+            obj_svc.initialize_model()
         list_gpu_services.append(obj_svc)
 
     # 모델을 워커에 라운드로빈으로 분배하는 큐
@@ -303,8 +306,9 @@ def run_secondary_particle_analysis(
                         str_device=obj_gpu.obj_config.str_device,
                     )
                 )
-                obj_service.obj_model = obj_gpu.obj_model
-                obj_service.dict_modelConfig = dict(obj_gpu.dict_modelConfig)
+                if not bool_useOpenCV:
+                    obj_service.obj_model = obj_gpu.obj_model
+                    obj_service.dict_modelConfig = dict(obj_gpu.dict_modelConfig)
                 float_t0 = time.perf_counter()
                 obj_result = obj_service.process()
                 dict_fs = dict(obj_result.dict_summary)
@@ -414,4 +418,6 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             help="추론 device (예: cpu, cuda:0)")
     obj_parser.add_argument("--num_gpus", type=int, default=1,
                             help="멀티 GPU 병렬 처리 수. GPU가 여러 장이면 이미지를 분산 처리. 기본값: 1.")
+    obj_parser.add_argument("--opencv", action=argparse.BooleanOptionalAction, default=False,
+                            help="SAM2 대신 OpenCV CLAHE+Otsu 기반 세그멘테이션을 사용한다. 빠르지만 단순함.")
     return obj_parser
