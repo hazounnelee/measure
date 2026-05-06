@@ -31,6 +31,27 @@ from utils.io import collect_input_groups, build_image_output_dir
 from services.sam2_service import Sam2AspectRatioService
 
 
+def _draw_masks_on_roi(
+    arr_roi_bgr: np.ndarray,
+    list_masks: tp.List[np.ndarray],
+) -> np.ndarray:
+    """LSD 마스크를 ROI 이미지 위에 색상별로 오버레이해 반환한다."""
+    arr_out = arr_roi_bgr.copy()
+    for int_i, arr_mask in enumerate(list_masks):
+        int_hue = (int_i * 37) % 180
+        arr_hsv = np.array([[[int_hue, 220, 220]]], dtype=np.uint8)
+        tpl_color = cv2.cvtColor(arr_hsv, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+        arr_bool = arr_mask.astype(bool)
+        arr_out[arr_bool] = (
+            arr_out[arr_bool].astype(np.float32) * 0.45
+            + np.array(tpl_color, dtype=np.float32) * 0.55
+        ).astype(np.uint8)
+        arr_cnts, _ = cv2.findContours(
+            arr_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(arr_out, arr_cnts, -1, tpl_color, 1)
+    return arr_out
+
+
 # =========================================================
 # 1차 입자 분석 전용 상수
 # =========================================================
@@ -1093,6 +1114,9 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 int_min_length_px=0,
             )
 
+            dict_lsdSteps["lsd_06_masks_roi"] = _draw_masks_on_roi(
+                arr_inputRoiBgr, list_validMasks)
+
             if self.obj_primary_config.bool_fuseContours and list_objects:
                 int_before = len(list_objects)
                 list_objects, list_validMasks = fuse_contours(
@@ -1103,6 +1127,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     float_scale_um=self.obj_config.float_scaleMicrometers,
                 )
                 print(f"[fuse] {int_before}개 → {len(list_objects)}개", flush=True)
+                dict_lsdSteps["lsd_07_after_fusion"] = _draw_masks_on_roi(
+                    arr_inputRoiBgr, list_validMasks)
 
             int_min_len = self.obj_primary_config.int_lsdMinLengthPx
             if int_min_len > 0 and list_objects:

@@ -930,6 +930,35 @@ class Sam2AspectRatioService:
 
         return arr_overlay
 
+    def draw_eq_circles_clean(
+        self,
+        arr_imageBgr: np.ndarray,
+        list_objects: tp.List[ObjectMeasurement],
+        list_masks: tp.List[np.ndarray],
+    ) -> np.ndarray:
+        """마스크 + 등가원만 그린 클린 이미지 (레이블 없음)."""
+        int_h, int_w = arr_imageBgr.shape[:2]
+        arr_out = cv2.resize(arr_imageBgr, (int_w * 2, int_h * 2), interpolation=cv2.INTER_LINEAR)
+        for obj_measurement, arr_mask in zip(list_objects, list_masks):
+            arr_mask2 = cv2.resize(arr_mask, (int_w * 2, int_h * 2), interpolation=cv2.INTER_NEAREST)
+            tpl_fill = (60, 220, 60) if obj_measurement.str_category == "particle" else (0, 165, 255)
+            arr_out[arr_mask2 > 0] = (
+                arr_out[arr_mask2 > 0].astype(np.float32) * 0.55
+                + np.array(tpl_fill, dtype=np.float32) * 0.45
+            ).astype(np.uint8)
+        for obj_measurement, arr_mask in zip(list_objects, list_masks):
+            arr_cnt = self.extract_largest_contour(arr_mask)
+            if arr_cnt is None:
+                continue
+            tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (0, 140, 255)
+            cv2.drawContours(arr_out, [(arr_cnt * 2).astype(np.int32)], -1, tpl_color, 1)
+            if obj_measurement.str_category == "particle":
+                int_cx2 = int(round(obj_measurement.float_centroidX * 2))
+                int_cy2 = int(round(obj_measurement.float_centroidY * 2))
+                int_r2 = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi) * 2))
+                cv2.circle(arr_out, (int_cx2, int_cy2), int_r2, (255, 255, 255), 1)
+        return arr_out
+
     def build_summary(self, list_objects: tp.List[ObjectMeasurement]) -> tp.Dict[str, tp.Any]:
         """단일 이미지 처리 결과에 대한 요약 통계를 생성한다.
 
@@ -1050,6 +1079,7 @@ class Sam2AspectRatioService:
         dict_summary: tp.Dict[str, tp.Any],
         dict_roi: tp.Dict[str, int],
         dict_debug: tp.Dict[str, tp.Any],
+        arr_raw_masks: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
 
@@ -1092,6 +1122,33 @@ class Sam2AspectRatioService:
                     "03_overlay_roi.png"), arr_overlayRoi)
         cv2.imwrite(str(self.obj_config.path_outputDir /
                     "04_overlay_full.png"), arr_overlayFull)
+
+        # 파이프라인 단계별 이미지
+        list_pts = dict_debug.get("candidate_points", [])
+        if list_pts:
+            arr_pts_viz = arr_inputRoiBgr.copy()
+            for dict_pt in list_pts:
+                int_px, int_py = dict_pt["point_xy_roi"]
+                cv2.circle(arr_pts_viz, (int_px, int_py), 2, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_point_prompts.png"), arr_pts_viz)
+
+        if arr_raw_masks is not None and len(arr_raw_masks) > 0:
+            arr_raw_viz = arr_inputRoiBgr.copy()
+            for int_i, arr_m in enumerate(arr_raw_masks):
+                int_hue = (int_i * 37) % 180
+                tpl_c = cv2.cvtColor(
+                    np.array([[[int_hue, 200, 200]]], dtype=np.uint8), cv2.COLOR_HSV2BGR
+                )[0, 0].tolist()
+                arr_bool = arr_m.astype(bool)
+                arr_raw_viz[arr_bool] = (
+                    arr_raw_viz[arr_bool].astype(np.float32) * 0.5
+                    + np.array(tpl_c, dtype=np.float32) * 0.5
+                ).astype(np.uint8)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_raw_masks.png"), arr_raw_viz)
+
+        if list_objects:
+            arr_eq = self.draw_eq_circles_clean(arr_inputRoiBgr, list_objects, list_masks)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_eq_circles.png"), arr_eq)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
@@ -1201,6 +1258,7 @@ class Sam2AspectRatioService:
             dict_summary,
             dict_roi,
             dict_debug,
+            arr_raw_masks=arr_masks,
         )
 
         return Sam2AspectRatioResult(
