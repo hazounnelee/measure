@@ -1090,7 +1090,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 int_edge_margin=self.obj_config.int_bboxEdgeMargin,
                 float_area_threshold=self.obj_config.float_particleAreaThreshold,
                 bool_adaptive_thresh=self.obj_primary_config.bool_lsdAdaptiveThresh,
-                int_min_length_px=self.obj_primary_config.int_lsdMinLengthPx,
+                int_min_length_px=0,
             )
 
             if self.obj_primary_config.bool_fuseContours and list_objects:
@@ -1103,6 +1103,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     float_scale_um=self.obj_config.float_scaleMicrometers,
                 )
                 print(f"[fuse] {int_before}개 → {len(list_objects)}개", flush=True)
+
+            int_min_len = self.obj_primary_config.int_lsdMinLengthPx
+            if int_min_len > 0 and list_objects:
+                list_pairs = [(o, m) for o, m in zip(list_objects, list_validMasks)
+                              if o.float_longAxisPx >= int_min_len]
+                list_objects = [p[0] for p in list_pairs]
+                list_validMasks = [p[1] for p in list_pairs]
 
             int_primaryCount = sum(
                 1 for o in list_objects if o.str_category in ("acicular", "plate"))
