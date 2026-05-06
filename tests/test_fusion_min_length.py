@@ -81,12 +81,12 @@ obj_A = make_obj(0, cx=80,  cy=100, length=80, width=8, angle_deg=45,
 # B1, B2: shortaxis ~30, overlapping masks
 obj_B1 = make_obj(1, cx=260, cy=80,  length=30, width=8, angle_deg=45,
                   scale_px=SCALE_PX, scale_um=SCALE_UM)
-obj_B2 = make_obj(2, cx=260, cy=85, length=30, width=8, angle_deg=45,
+obj_B2 = make_obj(2, cx=260, cy=83, length=30, width=8, angle_deg=45,
                   scale_px=SCALE_PX, scale_um=SCALE_UM)
 
 mask_A  = make_rod_mask(cx=80,  cy=100, length=80, width=8, angle_deg=45)
 mask_B1 = make_rod_mask(cx=260, cy=80,  length=30, width=8, angle_deg=45)
-mask_B2 = make_rod_mask(cx=260, cy=85, length=30, width=8, angle_deg=45)
+mask_B2 = make_rod_mask(cx=260, cy=83, length=30, width=8, angle_deg=45)
 
 list_all_objs  = [obj_A, obj_B1, obj_B2]
 list_all_masks = [mask_A, mask_B1, mask_B2]
@@ -96,7 +96,7 @@ print(f"obj_B1.float_longAxisPx = {obj_B1.float_longAxisPx:.1f}px")
 print(f"obj_B2.float_longAxisPx = {obj_B2.float_longAxisPx:.1f}px")
 print(f"B1∩B2 mask overlap      = {int((mask_B1 & mask_B2).sum())} px")
 
-MIN_LENGTH = 40
+MIN_LENGTH = 38
 
 # ── Case 1: min_length 없이 전체 ─────────────────────────────────────────────
 assert len(list_all_objs) == 3, "입자 3개 시작 확인"
