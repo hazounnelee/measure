@@ -825,8 +825,14 @@ class Sam2AspectRatioService:
             "model_config_path": str(self.obj_config.path_modelConfig),
             "model_config_parse_status": self.dict_modelConfig.get("config_parse_status"),
             "model_weights_path": str(self.obj_config.path_modelWeights),
-            "model_weights_resolved_name": self.resolve_model_weights_path().name,
-            "model_name": self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem),
+            "model_weights_resolved_name": (
+                None if self.obj_config.bool_useOpenCV
+                else self.resolve_model_weights_path().name
+            ),
+            "model_name": (
+                "opencv" if self.obj_config.bool_useOpenCV
+                else self.dict_modelConfig.get("model", self.obj_config.path_modelWeights.stem)
+            ),
             "scale_pixels": float(self.obj_config.float_scalePixels),
             "scale_micrometers": float(self.obj_config.float_scaleMicrometers),
             "micrometers_per_pixel": float(float_micrometersPerPixel),
@@ -1042,7 +1048,7 @@ class Sam2AspectRatioService:
         arr_gray = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         obj_clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         arr_clahe = obj_clahe.apply(arr_gray)
-        _, arr_binary = cv2.threshold(arr_clahe, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        _, arr_binary = cv2.threshold(arr_clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         int_k = self.obj_config.int_maskMorphKernelSize
         if int_k > 1:
