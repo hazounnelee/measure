@@ -1,10 +1,13 @@
 from __future__ import annotations
 import argparse
+import dataclasses
 import json
 import time
 import typing as tp
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from queue import Queue
 
 import numpy as np
 from tqdm import tqdm
@@ -197,6 +200,7 @@ def run_secondary_particle_analysis(
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
     bool_useEqDiameter: bool = True,
     int_preprocessWidth: int = 1024,
+    int_numGpus: int = 1,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
     path_input = Path(str_input)
@@ -256,29 +260,75 @@ def run_secondary_particle_analysis(
 
     path_outputRoot.mkdir(parents=True, exist_ok=True)
 
+    # GPU 디바이스 목록 결정
+    list_devices: tp.List[tp.Optional[str]] = []
+    if int_numGpus > 1:
+        try:
+            import torch
+            int_avail = torch.cuda.device_count()
+            list_devices = [f"cuda:{i}" for i in range(min(int_numGpus, int_avail))]
+        except Exception:
+            pass
+    if not list_devices:
+        list_devices = [str_device]  # 단일 디바이스 (None 포함)
+
+    # 디바이스별 모델 초기화
     str_firstGroupId, list_firstImages = list_inputGroups[0]
-    print(f"[batch] init model: {list_firstImages[0].name}", flush=True)
-    obj_sharedService = Sam2AspectRatioService(_create_config(str_firstGroupId, list_firstImages[0]))
-    obj_sharedService.initialize_model()
+    list_gpu_services: tp.List[Sam2AspectRatioService] = []
+    for str_dev in list_devices:
+        cfg_dev = dataclasses.replace(
+            _create_config(str_firstGroupId, list_firstImages[0]),
+            str_device=str_dev,
+        )
+        obj_svc = Sam2AspectRatioService(cfg_dev)
+        print(f"[batch] init model on {str_dev or 'auto'}: {list_firstImages[0].name}", flush=True)
+        obj_svc.initialize_model()
+        list_gpu_services.append(obj_svc)
+
+    # 모델을 워커에 라운드로빈으로 분배하는 큐
+    obj_gpu_queue: Queue = Queue()
+    for obj_svc in list_gpu_services:
+        obj_gpu_queue.put(obj_svc)
 
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
-        list_fileSummaries: tp.List[tp.Dict[str, tp.Any]] = []
 
-        for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
-            obj_service = Sam2AspectRatioService(_create_config(str_groupId, path_image))
-            obj_service.obj_model = obj_sharedService.obj_model
-            obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)
-            float_t0 = time.perf_counter()
-            obj_result = obj_service.process()
-            float_elapsed = time.perf_counter() - float_t0
-            dict_fs = dict(obj_result.dict_summary)
-            dict_fs["img_id"] = str_groupId
-            dict_fs["image_name"] = path_image.name
-            dict_fs["image_path"] = str(path_image)
-            dict_fs["processing_time_sec"] = round(float_elapsed, 3)
-            list_fileSummaries.append(dict_fs)
+        def _run_image(path_image: Path) -> tp.Dict[str, tp.Any]:
+            obj_gpu = obj_gpu_queue.get()
+            try:
+                obj_service = Sam2AspectRatioService(
+                    dataclasses.replace(
+                        _create_config(str_groupId, path_image),
+                        str_device=obj_gpu.obj_config.str_device,
+                    )
+                )
+                obj_service.obj_model = obj_gpu.obj_model
+                obj_service.dict_modelConfig = dict(obj_gpu.dict_modelConfig)
+                float_t0 = time.perf_counter()
+                obj_result = obj_service.process()
+                dict_fs = dict(obj_result.dict_summary)
+                dict_fs["img_id"] = str_groupId
+                dict_fs["image_name"] = path_image.name
+                dict_fs["image_path"] = str(path_image)
+                dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
+                return dict_fs
+            finally:
+                obj_gpu_queue.put(obj_gpu)
+
+        int_workers = len(list_gpu_services)
+        list_fileSummaries: tp.List[tp.Dict[str, tp.Any]]
+        if int_workers == 1:
+            list_fileSummaries = [
+                _run_image(p)
+                for p in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False)
+            ]
+        else:
+            with ThreadPoolExecutor(max_workers=int_workers) as executor:
+                list_fileSummaries = list(tqdm(
+                    executor.map(_run_image, list_imagePaths),
+                    total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
+                ))
 
         dict_groupSummary = _build_img_id_summary(str_groupId, path_outputRoot, list_fileSummaries)
         path_groupDir = path_outputRoot / str_groupId
@@ -362,4 +412,6 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument("--retina_masks", action=argparse.BooleanOptionalAction, default=True)
     obj_parser.add_argument("--device", default=None,
                             help="추론 device (예: cpu, cuda:0)")
+    obj_parser.add_argument("--num_gpus", type=int, default=1,
+                            help="멀티 GPU 병렬 처리 수. GPU가 여러 장이면 이미지를 분산 처리. 기본값: 1.")
     return obj_parser

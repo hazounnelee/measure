@@ -85,6 +85,7 @@ def main() -> None:
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
         bool_useEqDiameter=obj_args.eq_diameter,
         int_preprocessWidth=obj_args.preprocess_width,
+        int_numGpus=obj_args.num_gpus,
     )
 
     print("===== 2차 입자 분석 결과 요약 =====")
