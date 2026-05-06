@@ -22,194 +22,13 @@ from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, normalize_image_to_uint8
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks, collect_input_groups, build_image_output_dir
-
-
-def load_particle_mean_sizes_from_csv(path_particlesCsv: Path) -> np.ndarray:
-    """`particles.csv`에서 particle 평균 크기(um)를 읽어온다.
-
-    Args:
-        path_particlesCsv: `particles.csv` 파일 경로. UTF-8 BOM(`utf-8-sig`)로 읽는다.
-
-    Returns:
-        각 row의 `float_eqDiameterUm` 값을 담은 `np.float32` 1차원 배열.
-        파일이 없거나 유효한 row가 없으면 빈 배열을 반환한다.
-    """
-    if not path_particlesCsv.exists():
-        return np.array([], dtype=np.float32)
-
-    list_meanSizes: tp.List[float] = []
-    with path_particlesCsv.open("r", newline="", encoding="utf-8-sig") as obj_f:
-        obj_reader = csv.DictReader(obj_f)
-        for dict_row in obj_reader:
-            try:
-                if "float_eqDiameterUm" in dict_row:
-                    list_meanSizes.append(float(dict_row["float_eqDiameterUm"]))
-                else:
-                    float_h = float(dict_row["float_longestHorizontalUm"])
-                    float_v = float(dict_row["float_longestVerticalUm"])
-                    list_meanSizes.append((float_h + float_v) / 2.0)
-            except (KeyError, TypeError, ValueError):
-                continue
-
-    if not list_meanSizes:
-        return np.array([], dtype=np.float32)
-    return np.array(list_meanSizes, dtype=np.float32)
-
-
-def get_lot_number_from_input_path(path_inputImage: Path) -> str:
-    """입력 이미지 경로에서 lot 번호를 추출한다.
-
-    Args:
-        path_inputImage: 원본 입력 이미지 경로.
-
-    Returns:
-        절대경로 기준 이미지 파일의 바로 위 directory 이름. 비어 있으면
-        `"UnknownLot"`을 반환한다.
-    """
-    try:
-        path_resolved = path_inputImage.resolve()
-    except OSError:
-        path_resolved = path_inputImage
-    str_lotNumber = path_resolved.parent.name.strip()
-    return str_lotNumber if str_lotNumber else "UnknownLot"
-
-
-def save_particle_distribution_histogram(
-    path_particlesCsv: Path,
-    path_outputImage: Path,
-    path_inputImage: Path,
-) -> None:
-    """particle 크기 분포 histogram을 `png` 파일로 저장한다.
-
-    Args:
-        path_particlesCsv: particle 측정 결과 CSV 경로. 평균 크기 계산의 데이터 소스다.
-        path_outputImage: 저장할 histogram 이미지 경로. 일반적으로 `particle_dist.png`.
-        path_inputImage: lot 번호 추출에 사용할 원본 이미지 경로.
-
-    Returns:
-        없음. `matplotlib`의 headless backend(`Agg`)를 사용해 histogram 이미지를
-        디스크에 저장한다.
-
-    Notes:
-        - x축 값은 micrometer 단위 particle 평균 크기다.
-        - 제목은 입력 이미지의 부모 directory 이름(lot 번호)이다.
-        - 평균 크기 위치에는 빨간 vertical line과 빨간 텍스트를 함께 표시한다.
-        - particle 데이터가 없으면 빈 축에 안내 문구만 그린다.
-    """
-    arr_meanSizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
-    str_lotNumber = get_lot_number_from_input_path(path_inputImage)
-    obj_fig, obj_ax = plt.subplots(figsize=(9.6, 6.4), dpi=100)
-
-    try:
-        obj_ax.set_title(str_lotNumber, fontsize=28)
-        obj_ax.set_ylabel("Count", fontsize=20)
-        obj_ax.set_xlabel("Mean of longest horizontal and vertical length (um)", fontsize=20)
-        obj_ax.tick_params(axis="both", labelsize=20)
-
-        if arr_meanSizes.size == 0:
-            obj_ax.text(
-                0.5,
-                0.5,
-                "No particle data in particles.csv",
-                ha="center",
-                va="center",
-                fontsize=13,
-                color="#666666",
-                transform=obj_ax.transAxes,
-            )
-            obj_ax.set_xticks([])
-            obj_ax.set_yticks([])
-        else:
-            int_numBins = int(np.clip(np.sqrt(arr_meanSizes.size), 5, 20))
-            float_minValue = float(np.min(arr_meanSizes))
-            float_maxValue = float(np.max(arr_meanSizes))
-            float_meanValue = float(np.mean(arr_meanSizes))
-            if abs(float_maxValue - float_minValue) < 1e-6:
-                float_minValue -= 0.5
-                float_maxValue += 0.5
-
-            obj_ax.hist(
-                arr_meanSizes,
-                bins=int_numBins,
-                range=(float_minValue, float_maxValue),
-                color="#508cf0",
-                edgecolor="#323232",
-                linewidth=1.0,
-            )
-
-            obj_ax.axvline(float_meanValue, color="red", linewidth=2.0)
-            float_yMax = obj_ax.get_ylim()[1]
-            obj_ax.text(
-                float_meanValue,
-                float_yMax * 0.96,
-                f"Mean: {float_meanValue:.2f} um",
-                color="red",
-                fontsize=24,
-                ha="left",
-                va="top",
-            )
-            obj_ax.grid(axis="y", linestyle="--", alpha=0.25)
-
-        obj_fig.tight_layout()
-        obj_fig.savefig(path_outputImage, bbox_inches="tight")
-    finally:
-        plt.close(obj_fig)
-
-
-def load_particle_sphericities_from_csv(path_particlesCsv: Path) -> np.ndarray:
-    if not path_particlesCsv.exists():
-        return np.array([], dtype=np.float32)
-    list_vals: tp.List[float] = []
-    with path_particlesCsv.open("r", newline="", encoding="utf-8-sig") as obj_f:
-        obj_reader = csv.DictReader(obj_f)
-        for dict_row in obj_reader:
-            try:
-                list_vals.append(float(dict_row["float_sphericity"]))
-            except (KeyError, TypeError, ValueError):
-                continue
-    if not list_vals:
-        return np.array([], dtype=np.float32)
-    return np.array(list_vals, dtype=np.float32)
-
-
-def save_sphericity_distribution_histogram(
-    path_particlesCsv: Path,
-    path_outputImage: Path,
-    path_inputImage: Path,
-) -> None:
-    arr_sphs = load_particle_sphericities_from_csv(path_particlesCsv)
-    str_lotNumber = get_lot_number_from_input_path(path_inputImage)
-    obj_fig, obj_ax = plt.subplots(figsize=(9.6, 6.4), dpi=100)
-    try:
-        obj_ax.set_title(str_lotNumber, fontsize=28)
-        obj_ax.set_ylabel("Count", fontsize=20)
-        obj_ax.set_xlabel("Sphericity", fontsize=20)
-        obj_ax.tick_params(axis="both", labelsize=20)
-        if arr_sphs.size == 0:
-            obj_ax.text(0.5, 0.5, "No particle data in particles.csv",
-                        ha="center", va="center", fontsize=13, color="#666666",
-                        transform=obj_ax.transAxes)
-            obj_ax.set_xticks([])
-            obj_ax.set_yticks([])
-        else:
-            int_numBins = int(np.clip(np.sqrt(arr_sphs.size), 5, 20))
-            float_minV = float(np.min(arr_sphs))
-            float_maxV = float(np.max(arr_sphs))
-            float_meanV = float(np.mean(arr_sphs))
-            if abs(float_maxV - float_minV) < 1e-6:
-                float_minV -= 0.5
-                float_maxV += 0.5
-            obj_ax.hist(arr_sphs, bins=int_numBins, range=(float_minV, float_maxV),
-                        color="#508cf0", edgecolor="#323232", linewidth=1.0)
-            obj_ax.axvline(float_meanV, color="red", linewidth=2.0)
-            obj_ax.text(float_meanV, obj_ax.get_ylim()[1] * 0.96,
-                        f"Mean: {float_meanV:.3f}", color="red", fontsize=24,
-                        ha="left", va="top")
-            obj_ax.grid(axis="y", linestyle="--", alpha=0.25)
-        obj_fig.tight_layout()
-        obj_fig.savefig(path_outputImage, bbox_inches="tight")
-    finally:
-        plt.close(obj_fig)
+from utils.histograms import (
+    load_particle_mean_sizes_from_csv,
+    get_lot_number_from_input_path,
+    load_particle_sphericities_from_csv,
+    save_particle_distribution_histogram,
+    save_sphericity_distribution_histogram,
+)
 
 
 CONST_PREPROCESS_WIDTH: int = 2048
@@ -384,14 +203,15 @@ class Sam2AspectRatioService:
         if arr_image is None:
             raise FileNotFoundError(
                 f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
-        int_final_h = CONST_PREPROCESS_HEIGHT - CONST_PREPROCESS_BOTTOM_CROP
-        if arr_image.shape[:2] != (int_final_h, CONST_PREPROCESS_WIDTH):
-            arr_image = cv2.resize(
-                arr_image, (CONST_PREPROCESS_WIDTH, CONST_PREPROCESS_HEIGHT),
-                interpolation=cv2.INTER_LINEAR,
-            )
-            arr_image = arr_image[:int_final_h, :]
-        return arr_image
+        int_w = self.obj_config.int_preprocessWidth
+        int_h_raw = round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH)
+        int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
+        int_h_final = int_h_raw - int_crop
+        if arr_image.shape[:2] == (int_h_final, int_w):
+            return arr_image
+        if arr_image.shape[:2] != (int_h_raw, int_w):
+            arr_image = cv2.resize(arr_image, (int_w, int_h_raw), interpolation=cv2.INTER_LINEAR)
+        return arr_image[:int_h_final, :]
 
     def extract_inference_roi(
         self,

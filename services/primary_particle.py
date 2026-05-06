@@ -1284,6 +1284,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         bool_arScreen: bool,
         int_lsdMinLengthPx: int,
         bool_fuseContours: bool,
+        int_preprocessWidth: int = 1024,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1333,6 +1334,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
             bool_fuseContours=bool_fuseContours,
+            int_preprocessWidth=int_preprocessWidth,
         )
 
 
@@ -1508,6 +1510,7 @@ def run_primary_particle_analysis(
     bool_arScreen: bool = False,
     int_lsdMinLengthPx: int = 20,
     bool_fuseContours: bool = False,
+    int_preprocessWidth: int = 1024,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1578,6 +1581,7 @@ def run_primary_particle_analysis(
             bool_arScreen=bool_arScreen,
             int_lsdMinLengthPx=int_lsdMinLengthPx,
             bool_fuseContours=bool_fuseContours,
+            int_preprocessWidth=int_preprocessWidth,
         )
 
     # 단일 이미지
@@ -1837,6 +1841,10 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         "--fuse",
         action=argparse.BooleanOptionalAction, default=False,
         help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 10°, 겹침 ≥ 40%%). 기본값: OFF.",
+    )
+    obj_parser.add_argument(
+        "--preprocess_width", type=int, default=1024,
+        help="전처리 이미지 가로 크기 (px). 세로는 비율에 맞게 자동 계산. 기본값: 1024.",
     )
     obj_parser.add_argument(
         "--min_length", type=int, default=20,

@@ -10,6 +10,7 @@ class Sam2AspectRatioConfig:
     path_outputDir: Path = Path("out")
     path_modelConfig: Path = Path("model/sam2.1_hiera_t.yaml")
     path_modelWeights: Path = Path("model/sam2.1_hiera_base_plus.pt")
+    int_preprocessWidth: int = 1024
     int_roiXMin: int = 0
     int_roiYMin: int = 0
     int_roiXMax: int = 1024

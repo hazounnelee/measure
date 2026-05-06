@@ -200,6 +200,7 @@ def run_secondary_particle_analysis(
     bool_retinaMasks: bool = CONST_DEFAULT_RETINA_MASKS,
     bool_saveIndividualMasks: bool = CONST_DEFAULT_SAVE_INDIVIDUAL_MASKS,
     bool_useEqDiameter: bool = True,
+    int_preprocessWidth: int = 1024,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
     path_input = Path(str_input)
@@ -248,6 +249,7 @@ def run_secondary_particle_analysis(
             bool_retinaMasks=bool_retinaMasks,
             bool_saveIndividualMasks=bool_saveIndividualMasks,
             bool_useEqDiameter=bool_useEqDiameter,
+            int_preprocessWidth=int_preprocessWidth,
         )
 
     if not bool_isBatch:
@@ -335,6 +337,8 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             default=CONST_MASK_MORPH_OPEN_ITERATIONS)
     obj_parser.add_argument("--mask_morph_close_iterations", type=int,
                             default=CONST_MASK_MORPH_CLOSE_ITERATIONS)
+    obj_parser.add_argument("--preprocess_width", type=int, default=1024,
+                            help="전처리 이미지 가로 크기 (px). 세로는 비율에 맞게 자동 계산. 기본값: 1024.")
     obj_parser.add_argument("--imgsz", type=int, default=CONST_DEFAULT_IMAGE_SIZE,
                             help="SAM2 추론 이미지 크기")
     obj_parser.add_argument("--tile_size", type=int, default=CONST_DEFAULT_TILE_SIZE)

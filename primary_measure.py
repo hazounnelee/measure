@@ -121,6 +121,7 @@ def main() -> None:
         bool_arScreen=obj_args.ar_screen,
         int_lsdMinLengthPx=obj_args.min_length,
         bool_fuseContours=obj_args.fuse,
+        int_preprocessWidth=obj_args.preprocess_width,
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")

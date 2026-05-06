@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """2차 입자 분석 CLI 진입점."""
+import argparse
 import json
 import sys
 import time
@@ -17,7 +18,6 @@ def main() -> None:
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
-    import argparse
     obj_preParser = argparse.ArgumentParser(add_help=False)
     obj_preParser.add_argument("--config", default=_DEFAULT_PATHS_CONFIG)
     obj_preArgs, _ = obj_preParser.parse_known_args()
@@ -76,6 +76,7 @@ def main() -> None:
         bool_retinaMasks=obj_args.retina_masks,
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
         bool_useEqDiameter=obj_args.eq_diameter,
+        int_preprocessWidth=obj_args.preprocess_width,
     )
 
     print("===== 2차 입자 분석 결과 요약 =====")
