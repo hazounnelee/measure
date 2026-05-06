@@ -268,7 +268,16 @@ def run_secondary_particle_analysis(
         try:
             import torch
             int_avail = torch.cuda.device_count()
-            list_devices = [f"cuda:{i}" for i in range(min(int_numGpus, int_avail))]
+            int_base = 0
+            if str_device and ":" in str_device:
+                try:
+                    int_base = int(str_device.split(":")[-1])
+                except ValueError:
+                    int_base = 0
+            list_devices = [
+                f"cuda:{int_base + i}"
+                for i in range(min(int_numGpus, int_avail - int_base))
+            ]
         except Exception:
             pass
     if not list_devices:

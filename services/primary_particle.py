@@ -1321,7 +1321,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_usePointPrompts=bool_usePointPrompts,
-            bool_smallParticle=False,
             float_scalePixels=float_scalePixels,
             float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,

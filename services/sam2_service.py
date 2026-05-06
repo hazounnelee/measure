@@ -212,8 +212,6 @@ class Sam2AspectRatioService:
         int_h_raw = round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH)
         int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
         int_h_final = int_h_raw - int_crop
-        if arr_image.shape[:2] == (int_h_final, int_w):
-            return arr_image
         if arr_image.shape[:2] != (int_h_raw, int_w):
             arr_image = cv2.resize(arr_image, (int_w, int_h_raw), interpolation=cv2.INTER_LINEAR)
         return arr_image[:int_h_final, :]
@@ -958,7 +956,7 @@ class Sam2AspectRatioService:
         if list_pts:
             arr_pts_viz = arr_inputRoiBgr.copy()
             for dict_pt in list_pts:
-                int_px, int_py = dict_pt["point_xy_roi"]
+                int_px, int_py = int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])
                 cv2.circle(arr_pts_viz, (int_px, int_py), 2, (0, 255, 255), -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_point_prompts.png"), arr_pts_viz)
 
