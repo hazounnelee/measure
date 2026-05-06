@@ -94,11 +94,14 @@ def fuse_contours(
         if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
             continue
 
-        int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_merged)
+        arr_rect_mask = np.zeros(arr_merged.shape, dtype=np.uint8)
+        cv2.fillPoly(arr_rect_mask, [arr_bpts.astype(np.int32)], 1)
+
+        int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_bpts.astype(np.int32))
         list_new_objects.append(PrimaryParticleMeasurement(
             int_index=int_new_idx,
             str_category=str_category,
-            int_maskArea=int(arr_merged.sum()),
+            int_maskArea=int(arr_rect_mask.sum()),
             float_confidence=None,
             int_bboxX=int_bx,
             int_bboxY=int_by,
@@ -117,6 +120,6 @@ def fuse_contours(
             float_longestHorizontalUm=convert_pixels_to_micrometers(float(int_bw), float_scale_pixels, float_scale_um),
             float_longestVerticalUm=convert_pixels_to_micrometers(float(int_bh), float_scale_pixels, float_scale_um),
         ))
-        list_new_masks.append(arr_merged)
+        list_new_masks.append(arr_rect_mask)
 
     return list_new_objects, list_new_masks
