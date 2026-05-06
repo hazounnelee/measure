@@ -7,7 +7,7 @@ import sys
 import time
 
 from services.primary_particle import run_primary_particle_analysis, build_primary_arg_parser
-from configs import get_analysis_preset, load_paths_config
+from configs import get_analysis_preset, load_paths_config, parse_magnification, mag_to_scale_pixels, mag_to_preset_key
 from utils.metrics import json_default
 
 _DEFAULT_PATHS_CONFIG = "configs/paths.yaml"
@@ -20,7 +20,6 @@ def main() -> None:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
     # 1차 파싱: --config / --particle_type / --magnification 만 먼저 읽는다.
-    # add_help=False 이므로 미등록 인자는 무시된다.
     obj_preParser = argparse.ArgumentParser(add_help=False)
     obj_preParser.add_argument("--config", default=_DEFAULT_PATHS_CONFIG)
     obj_preParser.add_argument("--particle_type", default=None)
@@ -35,43 +34,36 @@ def main() -> None:
         metavar="FILE",
         help=(
             f"경로 설정 YAML 파일 (기본값: {_DEFAULT_PATHS_CONFIG}). "
-            "input / output_dir / model / model_cfg / device 를 지정할 수 있다. "
-            "CLI 인자가 항상 최우선이므로 언제든 덮어쓸 수 있다."
+            "input / output_dir / model / model_cfg / device 를 지정할 수 있다."
         ),
     )
 
     # 우선순위 (낮 → 높):
-    #   parser default → paths config → preset → CLI 인자
+    #   parser default → paths config → preset → 배율 스케일 → CLI 인자
 
     # 1) paths config 적용
     dict_paths = load_paths_config(obj_preArgs.config)
     if dict_paths:
         obj_parser.set_defaults(**dict_paths)
-        print(
-            f"[config] {obj_preArgs.config} 에서 경로 설정 로드 "
-            f"({', '.join(dict_paths.keys())})",
-            flush=True,
-        )
+        print(f"[config] {obj_preArgs.config} 에서 경로 설정 로드 ({', '.join(dict_paths.keys())})", flush=True)
 
-    # 2) preset 적용 (paths config 보다 우선)
+    # 2) preset 적용
+    float_mag = parse_magnification(obj_preArgs.magnification)
     if obj_preArgs.particle_type is not None:
-        str_mag = obj_preArgs.magnification or "50k"
-        dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_mag)
+        str_preset_key = mag_to_preset_key(float_mag) if float_mag else "20k"
+        dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_preset_key)
         if dict_preset:
             obj_parser.set_defaults(**dict_preset)
-            print(
-                f"[preset] {obj_preArgs.particle_type}/{str_mag} 프리셋 적용 "
-                f"({len(dict_preset)}개 파라미터)",
-                flush=True,
-            )
+            print(f"[preset] {obj_preArgs.particle_type}/{str_preset_key} 프리셋 적용 ({len(dict_preset)}개 파라미터)", flush=True)
         else:
-            print(
-                f"[preset] 알 수 없는 조합: {obj_preArgs.particle_type}/{str_mag} "
-                "(기본값 사용)",
-                flush=True,
-            )
+            print(f"[preset] 알 수 없는 조합: {obj_preArgs.particle_type}/{str_preset_key} (기본값 사용)", flush=True)
 
-    # 3) 전체 파싱: CLI 인자가 최우선
+    # 3) 배율에서 scale_pixels 자동 계산 (preset보다 우선, CLI보다 후순위)
+    if float_mag is not None:
+        obj_parser.set_defaults(scale_pixels=mag_to_scale_pixels(float_mag), scale_um=1.0)
+        print(f"[scale] {float_mag:.0f}x → scale_pixels={mag_to_scale_pixels(float_mag):.4f} px/µm", flush=True)
+
+    # 4) 전체 파싱: CLI 인자가 최우선
     obj_args = obj_parser.parse_args()
     float_start = time.perf_counter()
 

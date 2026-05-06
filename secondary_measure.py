@@ -7,7 +7,7 @@ import sys
 import time
 
 from services.secondary_particle import run_secondary_particle_analysis, build_secondary_arg_parser
-from configs import load_paths_config
+from configs import load_paths_config, parse_magnification, mag_to_scale_pixels
 from utils.metrics import json_default
 
 _DEFAULT_PATHS_CONFIG = "configs/paths.yaml"
@@ -20,6 +20,7 @@ def main() -> None:
 
     obj_preParser = argparse.ArgumentParser(add_help=False)
     obj_preParser.add_argument("--config", default=_DEFAULT_PATHS_CONFIG)
+    obj_preParser.add_argument("--magnification", default=None)
     obj_preArgs, _ = obj_preParser.parse_known_args()
 
     obj_parser = build_secondary_arg_parser()
@@ -32,12 +33,20 @@ def main() -> None:
             "input / output_dir / model / model_cfg / device 를 지정할 수 있다."
         ),
     )
+    obj_parser.add_argument(
+        "--magnification", default=None,
+        help="배율 (예: 1500, 3000, 20000, '20k'). scale_pixels를 자동 계산한다.",
+    )
 
     dict_paths = load_paths_config(obj_preArgs.config)
     if dict_paths:
         obj_parser.set_defaults(**dict_paths)
-        print(f"[config] {obj_preArgs.config} 에서 경로 설정 로드 "
-              f"({', '.join(dict_paths.keys())})", flush=True)
+        print(f"[config] {obj_preArgs.config} 에서 경로 설정 로드 ({', '.join(dict_paths.keys())})", flush=True)
+
+    float_mag = parse_magnification(obj_preArgs.magnification)
+    if float_mag is not None:
+        obj_parser.set_defaults(scale_pixels=mag_to_scale_pixels(float_mag), scale_um=1.0)
+        print(f"[scale] {float_mag:.0f}x → scale_pixels={mag_to_scale_pixels(float_mag):.4f} px/µm", flush=True)
 
     obj_args = obj_parser.parse_args()
     float_start = time.perf_counter()
