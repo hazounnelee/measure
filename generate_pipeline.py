@@ -165,23 +165,23 @@ def draw_primary():
     y -= 1.3
     box(ax, LX, y, CW, 1.1,
         "THRESHOLDING   (--lsd_adaptive_thresh)\n"
-        "Otsu  →  single global threshold  (float_otsu_thresh)\n"
-        "Adaptive  →  local Gaussian threshold  (block_size = max(11, ⌊min(H,W)/12⌋))\n"
-        "→  density  =  white_px / total_px  (computed here)",
+        "Otsu  →  single global threshold  |  Adaptive  →  local Gaussian\n"
+        "auto-invert if >55% white (ensures particles = foreground)\n"
+        "→  density  =  foreground(particle)_px / total_px  (computed here)",
         color=C_LSD, fs=7.2); larr(y - 0.55, y - 1.15)
 
     y -= 1.45
     box(ax, LX, y, CW, CH,
-        "CONTOUR EXTRACTION\n"
-        "cv2.findContours(binary)  →  minAreaRect per contour\n"
-        "→ long axis, short axis, angle, center  (= oriented bbox segment)",
+        "LSD SEGMENT DETECTION\n"
+        "cv2.createLineSegmentDetector()  →  line segments from gradient\n"
+        "→  (x1,y1)-(x2,y2), length, angle per segment",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
 
     y -= 1.3
     box(ax, LX, y, CW, CH,
-        "LENGTH FILTER\n"
-        "long_axis  ≥  20 px\n"
-        "--ar_screen OFF (default)  →  AR filter skipped  (all contours pass)",
+        "LENGTH FILTER  +  DEDUP\n"
+        "discard segments shorter than --min_length (default 10 px × scale)\n"
+        "deduplicate by centre distance (12 px) + angle similarity (25°)",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
 
 
@@ -189,8 +189,8 @@ def draw_primary():
     box(ax, LX, y, CW, 1.15,
         "PERPENDICULAR THICKNESS\n"
         "7 sample positions along segment  (t = 0.2 … 0.8)\n"
-        "scan ⊥ axis  ±  0.5 × px_per_µm\n"
-        "pick nearest bright run to scan centre  →  width\n"
+        "scan ⊥ axis  ±  max(40, 2×px/µm)  pixels\n"
+        "binary lookup (polarity-normalised)  →  nearest foreground run\n"
         "thickness  =  median of 7 estimates   (discard < 2 px)",
         color=C_LSD, fs=7.2); larr(y - 0.58, y - 1.22)
 
