@@ -24,15 +24,13 @@ def collect_input_groups(
 
     Returns list of (str_groupId, list_imagePaths).
     """
+    if not path_input.exists():
+        raise FileNotFoundError(f"입력 경로를 찾을 수 없습니다: {path_input}")
+
     if path_input.is_file():
         if path_input.suffix.lower() not in CONST_SUPPORTED_IMAGE_SUFFIXES:
             raise ValueError(f"지원하지 않는 이미지 형식: {path_input.suffix}")
-        if not path_input.exists():
-            raise FileNotFoundError(f"입력 파일을 찾을 수 없습니다: {path_input}")
         return [(path_input.stem, [path_input])]
-
-    if not path_input.exists():
-        raise FileNotFoundError(f"입력 경로를 찾을 수 없습니다: {path_input}")
 
     list_subdirs = sorted([p for p in path_input.iterdir() if p.is_dir()])
     if list_subdirs:

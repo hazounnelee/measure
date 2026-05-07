@@ -149,7 +149,7 @@ def enhance_image_texture(arr_tileGray: np.ndarray) -> np.ndarray:
     arr_blur = cv2.GaussianBlur(arr_eq, (3, 3), 0)
     arr_grad = cv2.Sobel(arr_blur, cv2.CV_32F, 1, 0) ** 2
     arr_grad += cv2.Sobel(arr_blur, cv2.CV_32F, 0, 1) ** 2
-    arr_grad = np.sqrt(arr_grad).astype(np.uint8)
+    arr_grad = cv2.normalize(np.sqrt(arr_grad), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     arr_lap = np.abs(cv2.Laplacian(arr_blur, cv2.CV_32F)).astype(np.uint8)
     arr_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     arr_blackhat = cv2.morphologyEx(arr_eq, cv2.MORPH_BLACKHAT, arr_kernel)
