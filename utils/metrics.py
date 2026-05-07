@@ -1,4 +1,6 @@
 from __future__ import annotations
+import json
+import math
 import typing as tp
 import numpy as np
 
@@ -43,12 +45,74 @@ def calculate_percentage(
     return round(100.0 * int_part / int_total, 2)
 
 
+def pooled_stats(
+    list_vals: tp.List[float],
+) -> tp.Dict[str, tp.Optional[float]]:
+    """Return mean/median/std dict for a list of floats, filtering NaN. Returns None fields if empty."""
+    if not list_vals:
+        return {"mean": None, "median": None, "std": None}
+    arr = np.array(list_vals, dtype=np.float64)
+    arr = arr[~np.isnan(arr)]
+    if arr.size == 0:
+        return {"mean": None, "median": None, "std": None}
+    return {
+        "mean": float(np.mean(arr)),
+        "median": float(np.median(arr)),
+        "std": float(np.std(arr)),
+    }
+
+
+def _safe_float(v: float) -> tp.Optional[float]:
+    """Return None for NaN/Inf, otherwise return the float unchanged."""
+    return None if math.isnan(v) or math.isinf(v) else v
+
+
+class _SafeJSONEncoder(json.JSONEncoder):
+    """JSON encoder that converts NaN/Inf floats to null and handles numpy types."""
+
+    def default(self, obj: tp.Any) -> tp.Any:
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return _safe_float(float(obj))
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
+    def iterencode(self, obj: tp.Any, _one_shot: bool = False) -> tp.Iterator[str]:
+        # Intercept float NaN/Inf before the C encoder can emit them as bare NaN/Infinity
+        return super().iterencode(self._sanitize(obj), _one_shot)
+
+    @classmethod
+    def _sanitize(cls, obj: tp.Any) -> tp.Any:
+        if isinstance(obj, float):
+            return _safe_float(obj)
+        if isinstance(obj, dict):
+            return {k: cls._sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [cls._sanitize(v) for v in obj]
+        if isinstance(obj, np.floating):
+            return _safe_float(float(obj))
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.ndarray):
+            return [cls._sanitize(v) for v in obj.tolist()]
+        return obj
+
+
 def json_default(obj: tp.Any) -> tp.Any:
     """Custom JSON default: convert numpy scalar/array to Python native type."""
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
-        return float(obj)
+        return _safe_float(float(obj))
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def json_dump_safe(obj: tp.Any, fp: tp.Any, **kwargs: tp.Any) -> None:
+    """Write JSON to file, replacing NaN/Inf with null for valid output."""
+    kwargs.setdefault("ensure_ascii", False)
+    kwargs.setdefault("indent", 2)
+    json.dump(obj, fp, cls=_SafeJSONEncoder, **kwargs)

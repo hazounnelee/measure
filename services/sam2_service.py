@@ -15,7 +15,7 @@ import yaml
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
 from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
-from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_default
+from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_default, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
 from utils.histograms import (
@@ -1008,14 +1008,13 @@ class Sam2AspectRatioService:
         )
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2, default=json_default)
+            json_dump_safe(dict_summary, obj_f)
 
         with (self.obj_config.path_outputDir / "objects.json").open("w", encoding="utf-8") as obj_f:
-            json.dump([asdict(obj_item) for obj_item in list_objects],
-                      obj_f, ensure_ascii=False, indent=2, default=json_default)
+            json_dump_safe([asdict(obj_item) for obj_item in list_objects], obj_f)
 
         with (self.obj_config.path_outputDir / "debug.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_debug, obj_f, ensure_ascii=False, indent=2, default=json_default)
+            json_dump_safe(dict_debug, obj_f)
 
         if not self.obj_config.bool_saveIndividualMasks:
             return

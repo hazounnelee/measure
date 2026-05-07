@@ -24,7 +24,7 @@ from core.schema import (
     PrimaryParticleMeasurement,
     PrimaryParticleResult,
 )
-from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default
+from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_default, json_dump_safe, pooled_stats
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours
@@ -1073,17 +1073,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
         # JSON
         with (self.obj_config.path_outputDir / "summary.json").open(
                 "w", encoding="utf-8") as obj_f:
-            json.dump(dict_summary, obj_f, ensure_ascii=False, indent=2,
-                      default=json_default)
+            json_dump_safe(dict_summary, obj_f)
         with (self.obj_config.path_outputDir / "objects.json").open(
                 "w", encoding="utf-8") as obj_f:
-            json.dump(
-                [asdict(o) for o in list_objects], obj_f, ensure_ascii=False, indent=2,
-                default=json_default)
+            json_dump_safe([asdict(o) for o in list_objects], obj_f)
         with (self.obj_config.path_outputDir / "debug.json").open(
                 "w", encoding="utf-8") as obj_f:
-            json.dump(dict_debug, obj_f, ensure_ascii=False, indent=2,
-                      default=json_default)
+            json_dump_safe(dict_debug, obj_f)
 
         if not self.obj_config.bool_saveIndividualMasks:
             return
@@ -1372,10 +1368,7 @@ def build_primary_img_id_summary(
         return calculate_mean_from_optional_values(list_vals)
 
     def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-        if not list_vals:
-            return {"mean": None, "median": None, "std": None}
-        arr = np.array(list_vals, dtype=np.float64)
-        return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+        return pooled_stats(list_vals)
 
     list_pooled_thickness: tp.List[float] = []
     for d in list_fileSummaries:
@@ -1420,10 +1413,7 @@ def build_primary_batch_summary(
     """1차 입자 배치 전체 통합 summary 를 생성한다."""
 
     def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-        if not list_vals:
-            return {"mean": None, "median": None, "std": None}
-        arr = np.array(list_vals, dtype=np.float64)
-        return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+        return pooled_stats(list_vals)
 
     list_all_thickness: tp.List[float] = []
     list_all_densities: tp.List[float] = []
@@ -1674,8 +1664,7 @@ def run_primary_particle_analysis(
         path_groupDir = path_outputRoot / str_groupId
         path_groupDir.mkdir(parents=True, exist_ok=True)
         with (path_groupDir / "img_id_summary.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_groupSummary, obj_f, ensure_ascii=False, indent=2,
-                      default=json_default)
+            json_dump_safe(dict_groupSummary, obj_f)
         list_groupSummaries.append(dict_groupSummary)
 
         print(
@@ -1689,8 +1678,7 @@ def run_primary_particle_analysis(
     dict_batchSummary = build_primary_batch_summary(
         path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
-        json.dump(dict_batchSummary, obj_f, ensure_ascii=False, indent=2,
-                  default=json_default)
+        json_dump_safe(dict_batchSummary, obj_f)
 
     print(
         f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "

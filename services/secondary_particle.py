@@ -16,7 +16,7 @@ from tqdm import tqdm
 from core.schema import Sam2AspectRatioConfig, Sam2AspectRatioResult
 from services.sam2_service import Sam2AspectRatioService
 from utils.io import collect_input_groups
-from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_default
+from utils.metrics import calculate_mean_from_optional_values, calculate_percentage, json_default, json_dump_safe, pooled_stats
 
 # ── Secondary-specific constants ──────────────────────────────────────────────
 CONST_PARTICLE_AREA_THRESHOLD: float = 1500.0
@@ -65,10 +65,7 @@ def _build_image_output_dir(
 
 # ── Batch aggregation ──────────────────────────────────────────────────────────
 def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-    if not list_vals:
-        return {"mean": None, "median": None, "std": None}
-    arr = np.array(list_vals, dtype=np.float64)
-    return {"mean": float(np.mean(arr)), "median": float(np.median(arr)), "std": float(np.std(arr))}
+    return pooled_stats(list_vals)
 
 
 def _build_img_id_summary(
@@ -376,7 +373,7 @@ def run_secondary_particle_analysis(
         path_groupDir = path_outputRoot / str_groupId
         path_groupDir.mkdir(parents=True, exist_ok=True)
         with (path_groupDir / "img_id_summary.json").open("w", encoding="utf-8") as obj_f:
-            json.dump(dict_groupSummary, obj_f, ensure_ascii=False, indent=2, default=json_default)
+            json_dump_safe(dict_groupSummary, obj_f)
         list_groupSummaries.append(dict_groupSummary)
         print(f"[batch][group done] {str_groupId}  "
               f"particles={dict_groupSummary['num_particles']}  "
@@ -384,7 +381,7 @@ def run_secondary_particle_analysis(
 
     dict_batchSummary = _build_batch_summary(path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
-        json.dump(dict_batchSummary, obj_f, ensure_ascii=False, indent=2, default=json_default)
+        json_dump_safe(dict_batchSummary, obj_f)
     print(f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "
           f"{dict_batchSummary['num_images']} images", flush=True)
     return dict_batchSummary
