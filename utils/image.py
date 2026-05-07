@@ -220,8 +220,9 @@ def detect_sphere_roi(
     if int_r < int(min(int_h, int_w) * float_min_radius_ratio):
         return None
     float_cap = float(np.clip(float_cap_fraction, 0.1, 1.0))
-    int_y1 = max(0, int_cy - int_r)
-    int_y2 = min(int_h, int_y1 + int(int_r * 2 * float_cap))
+    int_y_sphere_top = int_cy - int_r
+    int_y1 = max(0, int_y_sphere_top)
+    int_y2 = min(int_h, int_y_sphere_top + int(int_r * 2 * float_cap))
     int_x1 = max(0, int_cx - int_r)
     int_x2 = min(int_w, int_cx + int_r)
     if int_x2 <= int_x1 or int_y2 <= int_y1:
