@@ -361,8 +361,8 @@ s = _slide()
 _header(s, "전체 파이프라인 개요", "03 방법론")
 _pgnum(s, 6)
 
-# 왼쪽: 2차입자 (secondary_measure.py)
-_box(s, ["2차 입자 파이프라인", "(secondary_measure.py)"],
+# 왼쪽: 1차입자 (secondary_measure.py)
+_box(s, ["1차 입자 파이프라인", "(secondary_measure.py)"],
      Inches(0.3), Inches(0.82), Inches(5.8), Inches(0.62),
      fill=NAVY, fg=WHITE, sz=Pt(13), bold=True)
 
@@ -393,8 +393,8 @@ for i, (label, sub) in enumerate(steps_1):
         _arrow_v(s, cx1, y_s + bh, y_s + bh + gap_p)
     y_s += bh + gap_p
 
-# 오른쪽: 1차입자 (primary_measure.py)
-_box(s, ["1차 입자 파이프라인", "(primary_measure.py)"],
+# 오른쪽: 2차입자 (primary_measure.py)
+_box(s, ["2차 입자 파이프라인", "(primary_measure.py)"],
      Inches(7.2), Inches(0.82), Inches(5.8), Inches(0.62),
      fill=ORANGE, fg=WHITE, sz=Pt(13), bold=True)
 
