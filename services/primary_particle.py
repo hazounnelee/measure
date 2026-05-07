@@ -1367,9 +1367,6 @@ def build_primary_img_id_summary(
         ]
         return calculate_mean_from_optional_values(list_vals)
 
-    def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-        return pooled_stats(list_vals)
-
     list_pooled_thickness: tp.List[float] = []
     for d in list_fileSummaries:
         list_pooled_thickness.extend(d.get("all_primary_thickness_um_raw") or [])
@@ -1396,11 +1393,11 @@ def build_primary_img_id_summary(
         "plate_long_axis_um_mean": _mean_stat("plate_long_axis_um", "mean"),
         "plate_aspect_ratio_mean": _mean_stat("plate_aspect_ratio", "mean"),
         "all_primary_thickness_um_mean": _mean_stat("all_primary_thickness_um", "mean"),
-        "all_primary_thickness_um": _pooled_stats(list_pooled_thickness),
+        "all_primary_thickness_um": pooled_stats(list_pooled_thickness),
         "roi_density_mean": calculate_mean_from_optional_values(list_densities),
-        "roi_density": _pooled_stats(list_densities),
+        "roi_density": pooled_stats(list_densities),
         "all_primary_thickness_um_raw": list_pooled_thickness,
-        "processing_time_sec": _pooled_stats(list_times),
+        "processing_time_sec": pooled_stats(list_times),
         "files": list_fileSummaries,
     }
 
@@ -1411,9 +1408,6 @@ def build_primary_batch_summary(
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
     """1차 입자 배치 전체 통합 summary 를 생성한다."""
-
-    def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-        return pooled_stats(list_vals)
 
     list_all_thickness: tp.List[float] = []
     list_all_densities: tp.List[float] = []
@@ -1446,10 +1440,10 @@ def build_primary_batch_summary(
             d.get("plate_thickness_um_mean") for d in list_groupSummaries),
         "all_primary_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("all_primary_thickness_um_mean") for d in list_groupSummaries),
-        "all_primary_thickness_um": _pooled_stats(list_all_thickness),
+        "all_primary_thickness_um": pooled_stats(list_all_thickness),
         "roi_density_mean": calculate_mean_from_optional_values(list_all_densities),
-        "roi_density": _pooled_stats(list_all_densities),
-        "processing_time_sec": _pooled_stats(list_all_times),
+        "roi_density": pooled_stats(list_all_densities),
+        "processing_time_sec": pooled_stats(list_all_times),
         "img_ids": list_groupSummaries,
     }
 

@@ -64,9 +64,6 @@ def _build_image_output_dir(
 
 
 # ── Batch aggregation ──────────────────────────────────────────────────────────
-def _pooled_stats(list_vals: tp.List[float]) -> tp.Dict[str, tp.Optional[float]]:
-    return pooled_stats(list_vals)
-
 
 def _build_img_id_summary(
     str_imgId: str,
@@ -101,18 +98,18 @@ def _build_img_id_summary(
         "normal_particle_count": int_particleCount,
         "fine_particle_count": int_fragmentCount,
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
-        "fine_particle_ratio_percent_stats": _pooled_stats(list_fine_ratios),
+        "fine_particle_ratio_percent_stats": pooled_stats(list_fine_ratios),
         "fragment_count_mean_per_image": calculate_mean_from_optional_values(
             float(d.get("fragment_count") or 0) for d in list_fileSummaries),
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_fileSummaries),
-        "particle_sphericity": _pooled_stats(list_pooled_sphs),
+        "particle_sphericity": pooled_stats(list_pooled_sphs),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_fileSummaries),
-        "particle_size_um": _pooled_stats(list_pooled_sizes),
+        "particle_size_um": pooled_stats(list_pooled_sizes),
         "particle_sphericity_raw": list_pooled_sphs,
         "particle_size_um_raw": list_pooled_sizes,
-        "processing_time_sec": _pooled_stats(list_times),
+        "processing_time_sec": pooled_stats(list_times),
         "files": list_fileSummaries,
     }
 
@@ -149,16 +146,16 @@ def _build_batch_summary(
         "num_fragments": int_fragmentCount,
         "fragment_count_total": int(sum((d.get("fragment_count_total") or 0) for d in list_groupSummaries)),
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
-        "fine_particle_ratio_percent_stats": _pooled_stats(list_all_fine_ratios),
+        "fine_particle_ratio_percent_stats": pooled_stats(list_all_fine_ratios),
         "fragment_count_mean_per_img_id": calculate_mean_from_optional_values(
             d.get("fragment_count_mean_per_image") for d in list_groupSummaries),
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_groupSummaries),
-        "particle_sphericity": _pooled_stats(list_all_sphs),
+        "particle_sphericity": pooled_stats(list_all_sphs),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_groupSummaries),
-        "particle_size_um": _pooled_stats(list_all_sizes),
-        "processing_time_sec": _pooled_stats(list_all_times),
+        "particle_size_um": pooled_stats(list_all_sizes),
+        "processing_time_sec": pooled_stats(list_all_times),
         "img_ids": list_groupSummaries,
     }
 
