@@ -10,11 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import matplotlib
 import numpy as np
 import yaml
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model

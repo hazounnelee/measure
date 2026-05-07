@@ -15,9 +15,9 @@ from pathlib import Path
 
 import cv2
 import matplotlib
-import numpy as np
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+import numpy as np
 
 from core.schema import (
     PrimaryParticleConfig,
@@ -934,7 +934,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         list_pl = [o.float_thicknessUm for o in list_objects if o.str_category == "plate"]
 
         str_lot = self.obj_config.path_input.resolve().parent.name or "UnknownLot"
-        obj_fig, obj_ax = plt.subplots(figsize=(10, 6), dpi=100)
+        obj_fig = Figure(figsize=(10, 6), dpi=100)
+        obj_ax = obj_fig.add_subplot(111)
         try:
             obj_ax.set_title(f"{str_lot} — Primary Particle Thickness", fontsize=18)
             obj_ax.set_xlabel("Thickness (µm)", fontsize=14)
@@ -977,7 +978,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             obj_fig.tight_layout()
             obj_fig.savefig(str(path_output), bbox_inches="tight")
         finally:
-            plt.close(obj_fig)
+            obj_fig.clf()
 
     def save_primary_outputs(
         self,

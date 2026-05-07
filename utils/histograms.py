@@ -5,7 +5,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 
 
@@ -49,7 +49,8 @@ def save_particle_distribution_histogram(
     list_sizes = load_particle_mean_sizes_from_csv(path_particlesCsv)
     str_lot = get_lot_number_from_input_path(path_inputImage)
 
-    obj_fig, obj_ax = plt.subplots(figsize=(10, 6), dpi=100)
+    obj_fig = Figure(figsize=(10, 6), dpi=100)
+    obj_ax = obj_fig.add_subplot(111)
     try:
         obj_ax.set_title(f"{str_lot} — Secondary Particle Size", fontsize=18)
         obj_ax.set_xlabel("Equivalent Diameter (µm)", fontsize=14)
@@ -75,7 +76,7 @@ def save_particle_distribution_histogram(
         obj_fig.tight_layout()
         obj_fig.savefig(str(path_outputImage), bbox_inches="tight")
     finally:
-        plt.close(obj_fig)
+        obj_fig.clf()
 
 
 def save_sphericity_distribution_histogram(
@@ -86,7 +87,8 @@ def save_sphericity_distribution_histogram(
     list_sphs = load_particle_sphericities_from_csv(path_particlesCsv)
     str_lot = get_lot_number_from_input_path(path_inputImage)
 
-    obj_fig, obj_ax = plt.subplots(figsize=(10, 6), dpi=100)
+    obj_fig = Figure(figsize=(10, 6), dpi=100)
+    obj_ax = obj_fig.add_subplot(111)
     try:
         obj_ax.set_title(f"{str_lot} — Secondary Particle Sphericity", fontsize=18)
         obj_ax.set_xlabel("Sphericity", fontsize=14)
@@ -113,4 +115,4 @@ def save_sphericity_distribution_histogram(
         obj_fig.tight_layout()
         obj_fig.savefig(str(path_outputImage), bbox_inches="tight")
     finally:
-        plt.close(obj_fig)
+        obj_fig.clf()
