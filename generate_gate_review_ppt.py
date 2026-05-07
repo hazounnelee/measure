@@ -332,9 +332,9 @@ _text(s, "이미지 전처리 공통 파이프라인",
       sz=Pt(13), bold=True, color=NAVY)
 prep_steps = [
     ("원본 SEM 이미지\n(가변 해상도)", LGRAY, DGRAY),
-    ("리사이즈\n2048 × 1636", LBLUE, NAVY),
-    ("하단 100px 크롭\n(스케일바 제거)", LBLUE, NAVY),
-    ("출력: 2048 × 1536\n(고정 해상도)", LORG, ORANGE),
+    ("리사이즈  (--preprocess_width W)\n기본 W=1024  →  1024 × 818", LBLUE, NAVY),
+    ("하단 크롭  (스케일바 제거)\n기본 round(W·100/2048)=50 px", LBLUE, NAVY),
+    ("출력 (기본)\n1024 × 768", LORG, ORANGE),
 ]
 bw, bh = Inches(2.4), Inches(0.72)
 xstart = Inches(0.4)
