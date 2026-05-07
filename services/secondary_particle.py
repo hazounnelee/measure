@@ -306,7 +306,7 @@ def run_secondary_particle_analysis(
 
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
 
-        def _run_image(path_image: Path) -> tp.Dict[str, tp.Any]:
+        def _run_image(path_image: Path) -> tp.Optional[tp.Dict[str, tp.Any]]:
             obj_gpu = obj_gpu_queue.get()
             try:
                 obj_service = Sam2AspectRatioService(
@@ -326,6 +326,9 @@ def run_secondary_particle_analysis(
                 dict_fs["image_path"] = str(path_image)
                 dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
                 return dict_fs
+            except Exception as exc:
+                print(f"[WARN] {path_image.name} 처리 실패 (skip): {exc}", flush=True)
+                return None
             finally:
                 obj_gpu_queue.put(obj_gpu)
 
@@ -333,15 +336,19 @@ def run_secondary_particle_analysis(
         list_fileSummaries: tp.List[tp.Dict[str, tp.Any]]
         if int_workers == 1:
             list_fileSummaries = [
-                _run_image(p)
-                for p in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False)
+                r for r in (
+                    _run_image(p)
+                    for p in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False)
+                ) if r is not None
             ]
         else:
             with ThreadPoolExecutor(max_workers=int_workers) as executor:
-                list_fileSummaries = list(tqdm(
-                    executor.map(_run_image, list_imagePaths),
-                    total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
-                ))
+                list_fileSummaries = [
+                    r for r in tqdm(
+                        executor.map(_run_image, list_imagePaths),
+                        total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
+                    ) if r is not None
+                ]
 
         dict_groupSummary = _build_img_id_summary(str_groupId, path_outputRoot, list_fileSummaries)
         path_groupDir = path_outputRoot / str_groupId

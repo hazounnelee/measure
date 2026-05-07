@@ -1623,35 +1623,44 @@ def run_primary_particle_analysis(
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
 
         if bool_lsd_mode:
-            def _run_lsd(path_image: Path) -> tp.Dict[str, tp.Any]:
-                obj_svc = PrimaryParticleService(_create_config(str_groupId, path_image))
-                float_t0 = time.perf_counter()
-                obj_res = obj_svc.process_primary()
-                dict_fs = dict(obj_res.dict_summary)
-                dict_fs["img_id"] = str_groupId
-                dict_fs["image_name"] = path_image.name
-                dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
-                return dict_fs
+            def _run_lsd(path_image: Path) -> tp.Optional[tp.Dict[str, tp.Any]]:
+                try:
+                    obj_svc = PrimaryParticleService(_create_config(str_groupId, path_image))
+                    float_t0 = time.perf_counter()
+                    obj_res = obj_svc.process_primary()
+                    dict_fs = dict(obj_res.dict_summary)
+                    dict_fs["img_id"] = str_groupId
+                    dict_fs["image_name"] = path_image.name
+                    dict_fs["processing_time_sec"] = round(time.perf_counter() - float_t0, 3)
+                    return dict_fs
+                except Exception as exc:
+                    print(f"[WARN] {path_image.name} 처리 실패 (skip): {exc}", flush=True)
+                    return None
 
             with ThreadPoolExecutor(max_workers=int_workers) as executor:
-                list_fileSummaries = list(tqdm(
-                    executor.map(_run_lsd, list_imagePaths),
-                    total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
-                ))
+                list_fileSummaries = [
+                    r for r in tqdm(
+                        executor.map(_run_lsd, list_imagePaths),
+                        total=len(list_imagePaths), desc=str_groupId, unit="img", leave=False,
+                    ) if r is not None
+                ]
         else:
             list_fileSummaries = []
             for path_image in tqdm(list_imagePaths, desc=str_groupId, unit="img", leave=False):
-                obj_service = PrimaryParticleService(_create_config(str_groupId, path_image))
-                obj_service.obj_model = obj_sharedService.obj_model  # type: ignore[union-attr]
-                obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)  # type: ignore[union-attr]
-                float_t0 = time.perf_counter()
-                obj_result = obj_service.process_primary()
-                float_elapsed = time.perf_counter() - float_t0
-                dict_fs = dict(obj_result.dict_summary)
-                dict_fs["img_id"] = str_groupId
-                dict_fs["image_name"] = path_image.name
-                dict_fs["processing_time_sec"] = round(float_elapsed, 3)
-                list_fileSummaries.append(dict_fs)
+                try:
+                    obj_service = PrimaryParticleService(_create_config(str_groupId, path_image))
+                    obj_service.obj_model = obj_sharedService.obj_model  # type: ignore[union-attr]
+                    obj_service.dict_modelConfig = dict(obj_sharedService.dict_modelConfig)  # type: ignore[union-attr]
+                    float_t0 = time.perf_counter()
+                    obj_result = obj_service.process_primary()
+                    float_elapsed = time.perf_counter() - float_t0
+                    dict_fs = dict(obj_result.dict_summary)
+                    dict_fs["img_id"] = str_groupId
+                    dict_fs["image_name"] = path_image.name
+                    dict_fs["processing_time_sec"] = round(float_elapsed, 3)
+                    list_fileSummaries.append(dict_fs)
+                except Exception as exc:
+                    print(f"[WARN] {path_image.name} 처리 실패 (skip): {exc}", flush=True)
 
         dict_groupSummary = build_primary_img_id_summary(
             str_groupId, path_outputRoot, list_fileSummaries)
