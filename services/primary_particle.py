@@ -818,6 +818,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             obj_ax.tick_params(labelsize=12)
 
             bool_hasData = False
+            list_pendingLabels: tp.List[tp.Tuple[float, str, str]] = []
             for list_vals, str_label, str_color in [
                 (list_ac, "Acicular", "#5588ff"),
                 (list_pl, "Plate",    "#44cc44"),
@@ -833,12 +834,16 @@ class PrimaryParticleService(Sam2AspectRatioService):
                         edgecolor="#333333", linewidth=0.8,
                     )
                     obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color=str_color)
-                    float_ymax = obj_ax.get_ylim()[1]
-                    obj_ax.text(
-                        float_mean, float_ymax * 0.95,
-                        f"  {str_label[:2]} mean: {float_mean:.3f} µm",
-                        color=str_color, fontsize=11, va="top",
-                    )
+                    list_pendingLabels.append((float_mean, str_label, str_color))
+
+            # Place mean labels after all histograms so y-limit is final
+            float_ymax = obj_ax.get_ylim()[1]
+            for float_mean, str_label, str_color in list_pendingLabels:
+                obj_ax.text(
+                    float_mean, float_ymax * 0.95,
+                    f"  {str_label[:2]} mean: {float_mean:.3f} µm",
+                    color=str_color, fontsize=11, va="top",
+                )
 
             if bool_hasData:
                 obj_ax.legend(fontsize=12)
