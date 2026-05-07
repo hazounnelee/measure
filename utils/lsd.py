@@ -86,10 +86,10 @@ def _is_bbox_near_edge(
     int_roiW: int, int_roiH: int, int_margin: int,
 ) -> bool:
     return (
-        int_bx < int_margin
-        or int_by < int_margin
-        or (int_bx + int_bw) > (int_roiW - int_margin)
-        or (int_by + int_bh) > (int_roiH - int_margin)
+        int_bx <= int_margin
+        or int_by <= int_margin
+        or (int_bx + int_bw) >= (int_roiW - int_margin)
+        or (int_by + int_bh) >= (int_roiH - int_margin)
     )
 
 
