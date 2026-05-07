@@ -1,5 +1,6 @@
 from __future__ import annotations
 import csv
+import math
 import typing as tp
 from pathlib import Path
 
@@ -20,7 +21,9 @@ def load_particle_mean_sizes_from_csv(path_csv: Path) -> tp.List[float]:
     with path_csv.open(encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             try:
-                list_vals.append(float(row["float_eqDiameterUm"]))
+                v = float(row["float_eqDiameterUm"])
+                if not math.isnan(v):
+                    list_vals.append(v)
             except (KeyError, ValueError):
                 pass
     return list_vals
@@ -33,9 +36,11 @@ def load_particle_sphericities_from_csv(path_csv: Path) -> tp.List[float]:
     with path_csv.open(encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             try:
-                v = row.get("float_sphericity", "")
-                if v and v.lower() not in ("none", ""):
-                    list_vals.append(float(v))
+                s = row.get("float_sphericity", "")
+                if s and s.lower() not in ("none", "nan", ""):
+                    v = float(s)
+                    if not math.isnan(v):
+                        list_vals.append(v)
             except ValueError:
                 pass
     return list_vals
