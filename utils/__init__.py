@@ -3,7 +3,6 @@ from utils.metrics import (
     convert_pixels_to_micrometers,
     calculate_mean_from_optional_values,
     calculate_percentage,
-    json_default,
 )
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.image import (

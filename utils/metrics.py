@@ -100,16 +100,6 @@ class _SafeJSONEncoder(json.JSONEncoder):
         return obj
 
 
-def json_default(obj: tp.Any) -> tp.Any:
-    """Custom JSON default: convert numpy scalar/array to Python native type."""
-    if isinstance(obj, np.integer):
-        return int(obj)
-    if isinstance(obj, np.floating):
-        return _safe_float(float(obj))
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
 
 def json_dump_safe(obj: tp.Any, fp: tp.Any, **kwargs: tp.Any) -> None:
     """Write JSON to file, replacing NaN/Inf with null for valid output."""

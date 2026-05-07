@@ -161,24 +161,6 @@ def _table(s, rows, l, t, w, h, hfill=NAVY, hfg=WHITE, alt=LGRAY, fsz=Pt(12)):
     return tbl
 
 
-def _flow_col(s, steps, cx, y_start, box_w, box_h, gap,
-              fill=NAVY, fg=WHITE, sz=Pt(12)):
-    """수직 플로우 박스 컬럼."""
-    boxes = []
-    y = y_start
-    for i, (label, sub) in enumerate(steps):
-        lines = [label] if not sub else [label, sub]
-        bh = box_h if not sub else box_h + Pt(4)
-        _box(s, lines, cx - box_w / 2, y, box_w, bh,
-             fill=fill, fg=fg, sz=sz, bold=(i == 0))
-        if i < len(steps) - 1:
-            arrow_y1 = y + bh
-            arrow_y2 = y + bh + gap
-            _arrow_v(s, cx, arrow_y1, arrow_y2, color=MGRAY, w=Pt(2))
-        boxes.append(y)
-        y += bh + gap
-    return boxes
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  SLIDE 1: 표지
