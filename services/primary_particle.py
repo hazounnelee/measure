@@ -1000,7 +1000,10 @@ class PrimaryParticleService(Sam2AspectRatioService):
         arr_overlayFull = arr_inputBgr.copy()
         int_roiW = dict_roi["x_max"] - dict_roi["x_min"]
         int_roiH = dict_roi["y_max"] - dict_roi["y_min"]
-        arr_overlayRoiSmall = cv2.resize(arr_overlayRoi, (int_roiW, int_roiH), interpolation=cv2.INTER_LINEAR)
+        # create_primary_overlay returns 2×-upscaled + stats bar; crop to the image portion only
+        arr_overlayRoiSmall = cv2.resize(
+            arr_overlayRoi[: int_roiH * 2, : int_roiW * 2],
+            (int_roiW, int_roiH), interpolation=cv2.INTER_LINEAR)
         arr_overlayFull[
             dict_roi["y_min"]:dict_roi["y_max"],
             dict_roi["x_min"]:dict_roi["x_max"],
