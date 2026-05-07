@@ -180,11 +180,10 @@ def draw_primary():
 
     y -= 1.3
     box(ax, LX, y, CW, CH,
-        "LENGTH FILTER  +  DEDUP\n"
-        "discard segments shorter than --min_length (default 10 px × scale)\n"
-        "deduplicate by centre distance (12 px) + angle similarity (25°)",
+        "DEDUP  (sort longest-first)\n"
+        "sort candidates by length descending  →  greedy deduplication\n"
+        "reject if centre_dist < 12 px  AND  |Δangle| < 25°",
         color=C_LSD, fs=7.5); larr(y - 0.48, y - 1.0)
-
 
     y -= 1.48
     box(ax, LX, y, CW, 1.15,
@@ -202,9 +201,17 @@ def draw_primary():
         "AR < acicular_threshold (0.40)  →  acicular\n"
         "AR ≥ threshold  →  plate\n"
         "mask area < area_threshold  →  discard",
-        color=C_MEAS, fs=7.5)
+        color=C_MEAS, fs=7.5); larr(y - 0.53, y - 1.05)
 
-    LSD_END_Y = y - 0.53
+    y -= 1.35
+    box(ax, LX, y, CW, 1.0,
+        "POST-PROCESSING  (optional)\n"
+        "--fuse: Union-Find merge of overlapping parallel segments\n"
+        "        Δangle < 15°,  overlap ≥ 70%  →  fuse into one\n"
+        "--min_length (default 10 px × scale): discard if long_axis < threshold",
+        color=C_LSD, fs=7.2)
+
+    LSD_END_Y = y - 0.50
 
     # ── SAM2 column ────────────────────────────────────────────────────────────
     y = 21.2
