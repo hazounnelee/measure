@@ -790,7 +790,11 @@ class PrimaryParticleService(Sam2AspectRatioService):
             f"{str_type}_long_axis_um": _stats(list_longAxisUm),
             f"{str_type}_aspect_ratio": _stats(list_aspectRatio),
             "acicular_thickness_um": _stats([o.float_thicknessUm for o in list_objects if o.str_category == "acicular"]),
+            "acicular_long_axis_um": _stats([o.float_longAxisUm for o in list_objects if o.str_category == "acicular"]),
+            "acicular_aspect_ratio": _stats([o.float_aspectRatio for o in list_objects if o.str_category == "acicular"]),
             "plate_thickness_um":    _stats([o.float_thicknessUm for o in list_objects if o.str_category == "plate"]),
+            "plate_long_axis_um":    _stats([o.float_longAxisUm for o in list_objects if o.str_category == "plate"]),
+            "plate_aspect_ratio":    _stats([o.float_aspectRatio for o in list_objects if o.str_category == "plate"]),
             "all_primary_thickness_um": _stats(list_thicknessUm),
             "all_primary_thickness_um_raw": [float(v) for v in list_thicknessUm],
         }
