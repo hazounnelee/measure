@@ -8,7 +8,7 @@ import time
 
 from services.primary_particle import run_primary_particle_analysis, build_primary_arg_parser
 from configs import get_analysis_preset, load_paths_config, parse_magnification, mag_to_scale_pixels, mag_to_preset_key
-from utils.metrics import json_default
+from utils.metrics import json_default, _SafeJSONEncoder
 
 _DEFAULT_PATHS_CONFIG = "configs/paths.yaml"
 
@@ -117,7 +117,7 @@ def main() -> None:
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")
-    print(json.dumps(dict_summary, ensure_ascii=False, indent=2, default=json_default))
+    print(json.dumps(dict_summary, ensure_ascii=False, indent=2, cls=_SafeJSONEncoder))
     print(f"Elapsed time: {time.perf_counter() - float_start:.4f} seconds")
 
 

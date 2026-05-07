@@ -30,8 +30,8 @@ def convert_pixels_to_micrometers(
 def calculate_mean_from_optional_values(
     list_values: tp.Iterable[tp.Optional[float]],
 ) -> tp.Optional[float]:
-    """Return mean of non-None values, or None if list is empty."""
-    valid = [v for v in list_values if v is not None]
+    """Return mean of non-None, non-NaN values, or None if no valid values."""
+    valid = [v for v in list_values if v is not None and not math.isnan(float(v))]
     return float(np.mean(valid)) if valid else None
 
 
