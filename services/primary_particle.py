@@ -1891,8 +1891,8 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help="겹치고 방향이 같은 컨투어를 하나로 융합한다 (Δangle < 10°, 겹침 ≥ 40%%). 기본값: OFF.",
     )
     obj_parser.add_argument(
-        "--preprocess_width", type=int, default=1024,
-        help="전처리 이미지 가로 크기 (px). 세로는 비율에 맞게 자동 계산. 기본값: 1024.",
+        "--preprocess_width", type=lambda x: max(64, int(x)), default=1024,
+        help="전처리 이미지 가로 크기 (px, 최솟값 64). 세로는 비율에 맞게 자동 계산. 기본값: 1024.",
     )
     obj_parser.add_argument(
         "--min_length", type=int, default=10,

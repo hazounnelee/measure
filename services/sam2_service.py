@@ -203,10 +203,10 @@ class Sam2AspectRatioService:
         if arr_image is None:
             raise FileNotFoundError(
                 f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
-        int_w = self.obj_config.int_preprocessWidth
-        int_h_raw = round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH)
+        int_w = max(1, self.obj_config.int_preprocessWidth)
+        int_h_raw = max(1, round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH))
         int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
-        int_h_final = int_h_raw - int_crop
+        int_h_final = max(1, int_h_raw - int_crop)
         if arr_image.shape[:2] != (int_h_raw, int_w):
             arr_image = cv2.resize(arr_image, (int_w, int_h_raw), interpolation=cv2.INTER_LINEAR)
         return arr_image[:int_h_final, :]
