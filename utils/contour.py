@@ -96,6 +96,8 @@ def fuse_contours(
         (float_cx, float_cy), (float_rw, float_rh), _ = rect
         float_long = max(float_rw, float_rh)
         float_short = min(float_rw, float_rh)
+        if float_long < 1.0:
+            continue
 
         arr_bpts = cv2.boxPoints(rect)
         float_d01 = float(np.linalg.norm(arr_bpts[1] - arr_bpts[0]))
