@@ -1389,13 +1389,13 @@ def build_primary_img_id_summary(
         "output_dir": str(path_outputRoot / str_imgId),
         "num_images": len(list_fileSummaries),
         "num_total_objects": int(
-            sum(d.get("num_total_objects", 0) for d in list_fileSummaries)),
+            sum((d.get("num_total_objects") or 0) for d in list_fileSummaries)),
         "num_acicular": int(
-            sum(d.get("num_acicular", 0) for d in list_fileSummaries)),
+            sum((d.get("num_acicular") or 0) for d in list_fileSummaries)),
         "num_plate": int(
-            sum(d.get("num_plate", 0) for d in list_fileSummaries)),
+            sum((d.get("num_plate") or 0) for d in list_fileSummaries)),
         "num_fragment": int(
-            sum(d.get("num_fragment", 0) for d in list_fileSummaries)),
+            sum((d.get("num_fragment") or 0) for d in list_fileSummaries)),
         "acicular_thickness_um_mean": _mean_stat("acicular_thickness_um", "mean"),
         "acicular_long_axis_um_mean": _mean_stat("acicular_long_axis_um", "mean"),
         "acicular_aspect_ratio_mean": _mean_stat("acicular_aspect_ratio", "mean"),
@@ -1441,15 +1441,15 @@ def build_primary_batch_summary(
         "output_dir": str(path_outputDir),
         "num_img_ids": len(list_groupSummaries),
         "num_images": int(
-            sum(d.get("num_images", 0) for d in list_groupSummaries)),
+            sum((d.get("num_images") or 0) for d in list_groupSummaries)),
         "num_total_objects": int(
-            sum(d.get("num_total_objects", 0) for d in list_groupSummaries)),
+            sum((d.get("num_total_objects") or 0) for d in list_groupSummaries)),
         "num_acicular": int(
-            sum(d.get("num_acicular", 0) for d in list_groupSummaries)),
+            sum((d.get("num_acicular") or 0) for d in list_groupSummaries)),
         "num_plate": int(
-            sum(d.get("num_plate", 0) for d in list_groupSummaries)),
+            sum((d.get("num_plate") or 0) for d in list_groupSummaries)),
         "num_fragment": int(
-            sum(d.get("num_fragment", 0) for d in list_groupSummaries)),
+            sum((d.get("num_fragment") or 0) for d in list_groupSummaries)),
         "acicular_thickness_um_mean": calculate_mean_from_optional_values(
             d.get("acicular_thickness_um_mean") for d in list_groupSummaries),
         "plate_thickness_um_mean": calculate_mean_from_optional_values(

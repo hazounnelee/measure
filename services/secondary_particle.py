@@ -76,9 +76,9 @@ def _build_img_id_summary(
     path_outputRoot: Path,
     list_fileSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
-    int_totalObjects = int(sum(d.get("num_total_objects", 0) for d in list_fileSummaries))
-    int_particleCount = int(sum(d.get("num_particles", 0) for d in list_fileSummaries))
-    int_fragmentCount = int(sum(d.get("num_fragments", 0) for d in list_fileSummaries))
+    int_totalObjects = int(sum((d.get("num_total_objects") or 0) for d in list_fileSummaries))
+    int_particleCount = int(sum((d.get("num_particles") or 0) for d in list_fileSummaries))
+    int_fragmentCount = int(sum((d.get("num_fragments") or 0) for d in list_fileSummaries))
 
     list_pooled_sphs: tp.List[float] = []
     list_pooled_sizes: tp.List[float] = []
@@ -99,14 +99,14 @@ def _build_img_id_summary(
         "num_total_objects": int_totalObjects,
         "num_particles": int_particleCount,
         "num_fragments": int_fragmentCount,
-        "fragment_count_total": int(sum(d.get("fragment_count", 0) for d in list_fileSummaries)),
+        "fragment_count_total": int(sum((d.get("fragment_count") or 0) for d in list_fileSummaries)),
         "total_object_count": int_totalObjects,
         "normal_particle_count": int_particleCount,
         "fine_particle_count": int_fragmentCount,
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
         "fine_particle_ratio_percent_stats": _pooled_stats(list_fine_ratios),
         "fragment_count_mean_per_image": calculate_mean_from_optional_values(
-            float(d.get("fragment_count", 0)) for d in list_fileSummaries),
+            float(d.get("fragment_count") or 0) for d in list_fileSummaries),
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_fileSummaries),
         "particle_sphericity": _pooled_stats(list_pooled_sphs),
@@ -125,9 +125,9 @@ def _build_batch_summary(
     path_outputDir: Path,
     list_groupSummaries: tp.List[tp.Dict[str, tp.Any]],
 ) -> tp.Dict[str, tp.Any]:
-    int_totalObjects = int(sum(d.get("num_total_objects", 0) for d in list_groupSummaries))
-    int_particleCount = int(sum(d.get("num_particles", 0) for d in list_groupSummaries))
-    int_fragmentCount = int(sum(d.get("num_fragments", 0) for d in list_groupSummaries))
+    int_totalObjects = int(sum((d.get("num_total_objects") or 0) for d in list_groupSummaries))
+    int_particleCount = int(sum((d.get("num_particles") or 0) for d in list_groupSummaries))
+    int_fragmentCount = int(sum((d.get("num_fragments") or 0) for d in list_groupSummaries))
 
     list_all_sphs: tp.List[float] = []
     list_all_sizes: tp.List[float] = []
@@ -146,11 +146,11 @@ def _build_batch_summary(
         "input_path": str(path_input),
         "output_dir": str(path_outputDir),
         "num_img_ids": len(list_groupSummaries),
-        "num_images": int(sum(d.get("num_images", 0) for d in list_groupSummaries)),
+        "num_images": int(sum((d.get("num_images") or 0) for d in list_groupSummaries)),
         "num_total_objects": int_totalObjects,
         "num_particles": int_particleCount,
         "num_fragments": int_fragmentCount,
-        "fragment_count_total": int(sum(d.get("fragment_count_total", 0) for d in list_groupSummaries)),
+        "fragment_count_total": int(sum((d.get("fragment_count_total") or 0) for d in list_groupSummaries)),
         "fine_particle_ratio_percent": calculate_percentage(int_fragmentCount, int_totalObjects),
         "fine_particle_ratio_percent_stats": _pooled_stats(list_all_fine_ratios),
         "fragment_count_mean_per_img_id": calculate_mean_from_optional_values(
