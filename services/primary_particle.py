@@ -30,6 +30,7 @@ from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours
 from utils.io import collect_input_groups, build_image_output_dir
+from utils.iou import calculate_binary_iou, calculate_box_iou
 from services.sam2_service import Sam2AspectRatioService, CONST_SCALE_REFERENCE_WIDTH
 
 
@@ -113,9 +114,6 @@ CONST_DEFAULT_POINT_BATCH_SIZE: int = 32
 CONST_DEFAULT_DEDUP_IOU: float = 0.60
 CONST_DEFAULT_BBOX_DEDUP_IOU: float = 0.85
 CONST_DEFAULT_USE_POINT_PROMPTS: bool = True
-
-# iou 모듈 (predict_with_box_prompts, _merge_mask_results 등에서 사용)
-from utils.iou import calculate_binary_iou, calculate_box_iou
 
 
 # =========================================================
@@ -909,10 +907,15 @@ class PrimaryParticleService(Sam2AspectRatioService):
             "center_crop_ratio": float(self.obj_primary_config.float_centerCropRatio),
             "particle_area_threshold": float(self.obj_config.float_particleAreaThreshold),
             "num_total_objects": len(list_objects),
+            "num_acicular": len([o for o in list_objects if o.str_category == "acicular"]),
+            "num_plate":    len([o for o in list_objects if o.str_category == "plate"]),
+            "num_fragment": len([o for o in list_objects if o.str_category == "fragment"]),
             f"num_{str_type}": len(list_objects),
             f"{str_type}_thickness_um": _stats(list_thicknessUm),
             f"{str_type}_long_axis_um": _stats(list_longAxisUm),
             f"{str_type}_aspect_ratio": _stats(list_aspectRatio),
+            "acicular_thickness_um": _stats([o.float_thicknessUm for o in list_objects if o.str_category == "acicular"]),
+            "plate_thickness_um":    _stats([o.float_thicknessUm for o in list_objects if o.str_category == "plate"]),
             "all_primary_thickness_um": _stats(list_thicknessUm),
             "all_primary_thickness_um_raw": [float(v) for v in list_thicknessUm],
         }
