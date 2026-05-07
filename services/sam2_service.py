@@ -1047,6 +1047,14 @@ class Sam2AspectRatioService:
         arr_clahe = obj_clahe.apply(arr_gray)
         _, arr_binary = cv2.threshold(arr_clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
+        # Auto-invert when background dominates (>55% white) so watershed
+        # always operates on foreground=particles, consistent with other
+        # detection functions.
+        int_h_roi, int_w_roi = arr_binary.shape[:2]
+        int_total_px = int_h_roi * int_w_roi
+        if int_total_px > 0 and float((arr_binary > 0).sum()) / int_total_px > 0.55:
+            arr_binary = cv2.bitwise_not(arr_binary)
+
         int_k = self.obj_config.int_maskMorphKernelSize
         if int_k > 1:
             arr_kernel = np.ones((int_k, int_k), dtype=np.uint8)
