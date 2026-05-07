@@ -54,16 +54,31 @@ class Sam2AspectRatioService:
         self.obj_model: tp.Optional[tp.Any] = None
         self.dict_modelConfig: tp.Dict[str, tp.Any] = dict()
 
-    # ultralytics가 자동 다운로드하는 SAM2 이름 목록 (파일 미존재 시 존재 체크 생략)
-    _SET_AUTO_DOWNLOAD_NAMES: tp.ClassVar[tp.FrozenSet[str]] = frozenset({
+    # Maps long Hiera-style names → short Ultralytics-canonical names.
+    # Used both by resolve_model_weights_path (file creation) and
+    # _canonical_weights_name (pure name lookup, no filesystem side effects).
+    _DICT_ALIAS_NAMES: tp.ClassVar[tp.Dict[str, str]] = {
+        "sam2_hiera_tiny.pt": "sam2_t.pt",
+        "sam2_hiera_small.pt": "sam2_s.pt",
+        "sam2_hiera_base_plus.pt": "sam2_b.pt",
+        "sam2_hiera_large.pt": "sam2_l.pt",
+        "sam2.1_hiera_tiny.pt": "sam2.1_t.pt",
+        "sam2.1_hiera_small.pt": "sam2.1_s.pt",
+        "sam2.1_hiera_base_plus.pt": "sam2.1_b.pt",
+        "sam2.1_hiera_large.pt": "sam2.1_l.pt",
+    }
+
+    # Short Ultralytics-canonical names that don't need aliasing.
+    _SET_SUPPORTED_NAMES: tp.ClassVar[tp.FrozenSet[str]] = frozenset({
         "sam_h.pt", "sam_l.pt", "sam_b.pt", "mobile_sam.pt",
         "sam2_t.pt", "sam2_s.pt", "sam2_b.pt", "sam2_l.pt",
         "sam2.1_t.pt", "sam2.1_s.pt", "sam2.1_b.pt", "sam2.1_l.pt",
-        "sam2_hiera_tiny.pt", "sam2_hiera_small.pt",
-        "sam2_hiera_base_plus.pt", "sam2_hiera_large.pt",
-        "sam2.1_hiera_tiny.pt", "sam2.1_hiera_small.pt",
-        "sam2.1_hiera_base_plus.pt", "sam2.1_hiera_large.pt",
     })
+
+    # Union: all names that Ultralytics can auto-download (skip existence check).
+    _SET_AUTO_DOWNLOAD_NAMES: tp.ClassVar[tp.FrozenSet[str]] = (
+        _SET_SUPPORTED_NAMES | frozenset(_DICT_ALIAS_NAMES.keys())
+    )
 
     def validate_inputs(self) -> None:
         """필수 입력 경로들의 존재 여부를 검증한다.
@@ -112,19 +127,6 @@ class Sam2AspectRatioService:
             "config_preview": str_rawText[:200].strip(),
         }
 
-    # Canonical name lookup (alias map is duplicated here intentionally so that
-    # the pure-name query in build_summary has no file-system side effects)
-    _DICT_ALIAS_NAMES: tp.ClassVar[tp.Dict[str, str]] = {
-        "sam2_hiera_tiny.pt": "sam2_t.pt",
-        "sam2_hiera_small.pt": "sam2_s.pt",
-        "sam2_hiera_base_plus.pt": "sam2_b.pt",
-        "sam2_hiera_large.pt": "sam2_l.pt",
-        "sam2.1_hiera_tiny.pt": "sam2.1_t.pt",
-        "sam2.1_hiera_small.pt": "sam2.1_s.pt",
-        "sam2.1_hiera_base_plus.pt": "sam2.1_b.pt",
-        "sam2.1_hiera_large.pt": "sam2.1_l.pt",
-    }
-
     def _canonical_weights_name(self) -> str:
         """Return the Ultralytics-canonical filename without touching the filesystem."""
         name = self.obj_config.path_modelWeights.name
@@ -144,35 +146,11 @@ class Sam2AspectRatioService:
             FileNotFoundError: 현재 코드가 지원하지 않는 weight 파일명일 때 발생한다.
         """
         path_weights = self.obj_config.path_modelWeights
-        set_supportedNames = {
-            "sam_h.pt",
-            "sam_l.pt",
-            "sam_b.pt",
-            "mobile_sam.pt",
-            "sam2_t.pt",
-            "sam2_s.pt",
-            "sam2_b.pt",
-            "sam2_l.pt",
-            "sam2.1_t.pt",
-            "sam2.1_s.pt",
-            "sam2.1_b.pt",
-            "sam2.1_l.pt",
-        }
-        dict_aliasNames = {
-            "sam2_hiera_tiny.pt": "sam2_t.pt",
-            "sam2_hiera_small.pt": "sam2_s.pt",
-            "sam2_hiera_base_plus.pt": "sam2_b.pt",
-            "sam2_hiera_large.pt": "sam2_l.pt",
-            "sam2.1_hiera_tiny.pt": "sam2.1_t.pt",
-            "sam2.1_hiera_small.pt": "sam2.1_s.pt",
-            "sam2.1_hiera_base_plus.pt": "sam2.1_b.pt",
-            "sam2.1_hiera_large.pt": "sam2.1_l.pt",
-        }
 
-        if path_weights.name in set_supportedNames:
+        if path_weights.name in self._SET_SUPPORTED_NAMES:
             return path_weights
 
-        str_aliasName = dict_aliasNames.get(path_weights.name)
+        str_aliasName = self._DICT_ALIAS_NAMES.get(path_weights.name)
         if str_aliasName is None:
             raise FileNotFoundError(
                 f"{path_weights} 는 현재 ultralytics가 인식하는 SAM2 체크포인트 이름이 아닙니다."
