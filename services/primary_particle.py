@@ -1009,7 +1009,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 int_edge_margin=self.obj_config.int_bboxEdgeMargin,
                 float_area_threshold=self.obj_config.float_particleAreaThreshold,
                 bool_adaptive_thresh=self.obj_primary_config.bool_lsdAdaptiveThresh,
-                int_min_length_px=0,
+                int_min_length_px=self.obj_primary_config.int_lsdMinLengthPx,
             )
 
             dict_lsdSteps["lsd_06_masks_roi"] = _draw_masks_on_roi(
@@ -1038,13 +1038,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 print(f"[{str_mode}] {int_before}개 → {len(list_objects)}개", flush=True)
                 dict_lsdSteps["lsd_07_after_fusion"] = _draw_masks_on_roi(
                     arr_inputRoiBgr, list_validMasks)
-
-            int_min_len = self.obj_primary_config.int_lsdMinLengthPx
-            if int_min_len > 0 and list_objects:
-                list_pairs = [(o, m) for o, m in zip(list_objects, list_validMasks)
-                              if o.float_longAxisPx >= int_min_len]
-                list_objects = [p[0] for p in list_pairs]
-                list_validMasks = [p[1] for p in list_pairs]
 
             int_primaryCount = sum(
                 1 for o in list_objects if o.str_category in ("acicular", "plate"))

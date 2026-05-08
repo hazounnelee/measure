@@ -156,7 +156,8 @@ def detect_acicular_lsd(
 
     # Density: fraction of bright (white) pixels in the binary image.
     # More black area (background) → lower density.
-    float_density = float((arr_thresh_binary > 0).sum()) / (int_roiH * int_roiW)
+    int_total_px = int_roiH * int_roiW
+    float_density = float((arr_thresh_binary > 0).sum()) / int_total_px if int_total_px > 0 else 0.0
 
     obj_lsd = cv2.createLineSegmentDetector(0)
     arr_lines, _, _, _ = obj_lsd.detect(arr_blur)
