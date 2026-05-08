@@ -82,9 +82,15 @@ def _build_img_id_summary(
         list_pooled_sphs.extend(d.get("particle_sphericity_raw") or [])
         list_pooled_sizes.extend(d.get("particle_size_um_raw") or [])
         if d.get("fine_particle_ratio_percent") is not None:
-            list_fine_ratios.append(float(d["fine_particle_ratio_percent"]))
+            try:
+                list_fine_ratios.append(float(d["fine_particle_ratio_percent"]))
+            except (TypeError, ValueError):
+                pass
         if d.get("processing_time_sec") is not None:
-            list_times.append(float(d["processing_time_sec"]))
+            try:
+                list_times.append(float(d["processing_time_sec"]))
+            except (TypeError, ValueError):
+                pass
 
     return {
         "img_id": str_imgId,
@@ -132,9 +138,15 @@ def _build_batch_summary(
         list_all_sizes.extend(g.get("particle_size_um_raw") or [])
         for f in g.get("files") or []:
             if f.get("fine_particle_ratio_percent") is not None:
-                list_all_fine_ratios.append(float(f["fine_particle_ratio_percent"]))
+                try:
+                    list_all_fine_ratios.append(float(f["fine_particle_ratio_percent"]))
+                except (TypeError, ValueError):
+                    pass
             if f.get("processing_time_sec") is not None:
-                list_all_times.append(float(f["processing_time_sec"]))
+                try:
+                    list_all_times.append(float(f["processing_time_sec"]))
+                except (TypeError, ValueError):
+                    pass
 
     return {
         "input_path": str(path_input),

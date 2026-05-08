@@ -1313,9 +1313,15 @@ def build_primary_batch_summary(
         list_all_thickness.extend(g.get("all_primary_thickness_um_raw") or [])
         for f in g.get("files") or []:
             if f.get("roi_density") is not None:
-                list_all_densities.append(float(f["roi_density"]))
+                try:
+                    list_all_densities.append(float(f["roi_density"]))
+                except (TypeError, ValueError):
+                    pass
             if f.get("processing_time_sec") is not None:
-                list_all_times.append(float(f["processing_time_sec"]))
+                try:
+                    list_all_times.append(float(f["processing_time_sec"]))
+                except (TypeError, ValueError):
+                    pass
 
     return {
         "input_path": str(path_input),
