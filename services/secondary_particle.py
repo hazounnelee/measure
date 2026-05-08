@@ -379,8 +379,11 @@ def run_secondary_particle_analysis(
     dict_batchSummary = _build_batch_summary(path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json_dump_safe(dict_batchSummary, obj_f)
-    save_secondary_batch_histograms(
-        dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
+    try:
+        save_secondary_batch_histograms(
+            dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
+    except Exception as exc:
+        print(f"[WARN] batch 히스토그램 저장 실패 (결과에는 영향 없음): {exc}", flush=True)
     print(f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "
           f"{dict_batchSummary['num_images']} images", flush=True)
     return dict_batchSummary

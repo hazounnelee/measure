@@ -50,6 +50,13 @@ class Sam2AspectRatioService:
                 obj_config,
                 float_scalePixels=obj_config.float_scalePixels * float_factor,
             )
+        if obj_config.float_scalePixels <= 0:
+            print(
+                f"[WARN] float_scalePixels={obj_config.float_scalePixels} ≤ 0: "
+                "µm 환산이 불가능하여 모든 크기 지표가 0으로 출력됩니다. "
+                "--scale_pixels 값을 확인하세요.",
+                flush=True,
+            )
         self.obj_config = obj_config
         self.obj_model: tp.Optional[tp.Any] = None
         self.dict_modelConfig: tp.Dict[str, tp.Any] = dict()

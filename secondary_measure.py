@@ -43,7 +43,11 @@ def main() -> None:
         obj_parser.set_defaults(**dict_paths)
         print(f"[config] {obj_preArgs.config} 에서 경로 설정 로드 ({', '.join(dict_paths.keys())})", flush=True)
 
-    float_mag = parse_magnification(obj_preArgs.magnification)
+    try:
+        float_mag = parse_magnification(obj_preArgs.magnification)
+    except ValueError as exc:
+        print(f"[ERROR] --magnification: {exc}", file=sys.stderr, flush=True)
+        sys.exit(1)
     if float_mag is not None:
         obj_parser.set_defaults(scale_pixels=mag_to_scale_pixels(float_mag), scale_um=1.0)
         print(f"[scale] {float_mag:.0f}x → scale_pixels={mag_to_scale_pixels(float_mag):.4f} px/µm", flush=True)
@@ -95,4 +99,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"\n[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)

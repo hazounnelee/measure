@@ -1577,8 +1577,11 @@ def run_primary_particle_analysis(
         path_input, path_outputRoot, list_groupSummaries)
     with (path_outputRoot / "batch_summary.json").open("w", encoding="utf-8") as obj_f:
         json_dump_safe(dict_batchSummary, obj_f)
-    save_primary_batch_histograms(
-        dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
+    try:
+        save_primary_batch_histograms(
+            dict_batchSummary, path_outputRoot, str_lot=path_input.stem)
+    except Exception as exc:
+        print(f"[WARN] batch 히스토그램 저장 실패 (결과에는 영향 없음): {exc}", flush=True)
 
     print(
         f"[batch] done: {dict_batchSummary['num_img_ids']} groups, "
@@ -1785,7 +1788,7 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help=(
             "방향 인식 융합: --fuse 조건에 더해 단축 방향 겹침만 융합한다. "
             "장축 방향(긴 쪽 끝-끝)으로 붙은 경우는 별개 입자로 보고 융합하지 않는다 "
-            f"(장축 변위 비율 > {CONST_FUSE_LONG_AXIS_THRESHOLD:.0%} → skip). 기본값: OFF."
+            f"(장축 변위 비율 > {int(CONST_FUSE_LONG_AXIS_THRESHOLD * 100)}%% → skip). 기본값: OFF."
         ),
     )
     obj_parser.add_argument(

@@ -48,7 +48,11 @@ def main() -> None:
         print(f"[config] {obj_preArgs.config} 에서 경로 설정 로드 ({', '.join(dict_paths.keys())})", flush=True)
 
     # 2) preset 적용
-    float_mag = parse_magnification(obj_preArgs.magnification)
+    try:
+        float_mag = parse_magnification(obj_preArgs.magnification)
+    except ValueError as exc:
+        print(f"[ERROR] --magnification: {exc}", file=sys.stderr, flush=True)
+        sys.exit(1)
     if obj_preArgs.particle_type is not None:
         str_preset_key = mag_to_preset_key(float_mag) if float_mag else "20k"
         dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_preset_key)
@@ -123,4 +127,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"\n[ERROR] {exc}", file=sys.stderr)
+        sys.exit(1)
