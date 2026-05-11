@@ -212,11 +212,14 @@ class Sam2AspectRatioService:
             raise FileNotFoundError(
                 f"이미지를 읽을 수 없습니다: {self.obj_config.path_input}")
         int_w = max(1, self.obj_config.int_preprocessWidth)
-        int_h_raw = max(1, round(int_w * CONST_PREPROCESS_HEIGHT / CONST_PREPROCESS_WIDTH))
         int_crop = round(int_w * CONST_PREPROCESS_BOTTOM_CROP / CONST_PREPROCESS_WIDTH)
-        int_h_final = max(1, int_h_raw - int_crop)
-        if arr_image.shape[:2] != (int_h_raw, int_w):
-            arr_image = cv2.resize(arr_image, (int_w, int_h_raw), interpolation=cv2.INTER_LINEAR)
+        int_img_h, int_img_w = arr_image.shape[:2]
+        # Resize width only (maintain aspect ratio) — never force a fixed height
+        if int_img_w != int_w:
+            int_new_h = max(1, round(int_img_h * int_w / int_img_w))
+            arr_image = cv2.resize(arr_image, (int_w, int_new_h), interpolation=cv2.INTER_LINEAR)
+        # Bottom crop (scale bar removal)
+        int_h_final = max(1, arr_image.shape[0] - int_crop)
         return arr_image[:int_h_final, :]
 
     def extract_inference_roi(
@@ -910,6 +913,38 @@ class Sam2AspectRatioService:
 
         return dict_summary
 
+    @staticmethod
+    def _append_stats_bar(
+        arr_img: np.ndarray,
+        dict_summary: tp.Dict[str, tp.Any],
+    ) -> np.ndarray:
+        """오버레이 이미지 하단에 정량화 지표 텍스트 바를 붙인다."""
+        int_n_particle = dict_summary.get("num_particles", 0) or 0
+        int_n_fragment = dict_summary.get("num_fragments", 0) or 0
+        float_fine = dict_summary.get("fine_particle_ratio_percent")
+        float_size = dict_summary.get("particle_mean_size_um")
+        float_sph = dict_summary.get("particle_sphericity_mean")
+
+        str_fine = f"{float_fine:.1f}%" if float_fine is not None else "N/A"
+        str_size = f"{float_size:.3f}µm" if float_size is not None else "N/A"
+        str_sph = f"{float_sph:.3f}" if float_sph is not None else "N/A"
+
+        str_stats = (
+            f"Particle={int_n_particle}  Fragment={int_n_fragment}"
+            f"  Fine%={str_fine}  MeanSize={str_size}  Sphericity={str_sph}"
+        )
+
+        int_ow = arr_img.shape[1]
+        float_scale = int_ow / 1800.0
+        int_font = cv2.FONT_HERSHEY_SIMPLEX
+        int_thick = max(1, int(round(float_scale * 1.5)))
+        (_, int_th), int_bl = cv2.getTextSize(str_stats, int_font, float_scale, int_thick)
+        int_bar_h = int_th + int_bl + int(16 * float_scale)
+        arr_bar = np.zeros((int_bar_h, int_ow, 3), dtype=np.uint8)
+        cv2.putText(arr_bar, str_stats, (int(8 * float_scale), int_th + int(8 * float_scale)),
+                    int_font, float_scale, (220, 220, 220), int_thick, cv2.LINE_AA)
+        return np.vstack([arr_img, arr_bar])
+
     def save_outputs(
         self,
         arr_inputBgr: np.ndarray,
@@ -959,20 +994,30 @@ class Sam2AspectRatioService:
                     "01_input.png"), arr_inputBgr)
         cv2.imwrite(str(self.obj_config.path_outputDir /
                     "02_input_roi.png"), arr_inputRoiBgr)
-        cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "03_overlay_roi.png"), arr_overlayRoi)
-        cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "04_overlay_full.png"), arr_overlayFull)
 
-        # 파이프라인 단계별 이미지
+        # ── 파이프라인 단계별 이미지 (순서대로) ───────────────────────────────
+
+        # 03: 타일 그리드
+        list_tiles = dict_debug.get("tiles", [])
+        if list_tiles:
+            arr_tiles_viz = arr_inputRoiBgr.copy()
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                cv2.rectangle(arr_tiles_viz, (int_tx1, int_ty1), (int_tx2, int_ty2),
+                              (200, 200, 0), 1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "03_pipeline_tiles.png"), arr_tiles_viz)
+
+        # 04: 포인트 프롬프트
         list_pts = dict_debug.get("candidate_points", [])
         if list_pts:
             arr_pts_viz = arr_inputRoiBgr.copy()
             for dict_pt in list_pts:
-                int_px, int_py = int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_pts_viz, (int_px, int_py), 2, (0, 255, 255), -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_point_prompts.png"), arr_pts_viz)
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_pts_viz, (int_px, int_py), 3, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "04_pipeline_point_prompts.png"), arr_pts_viz)
 
+        # 05: 탐지된 원시 마스크 전체
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
             arr_raw_viz = arr_inputRoiBgr.copy()
             for int_i, arr_m in enumerate(arr_raw_masks):
@@ -985,11 +1030,24 @@ class Sam2AspectRatioService:
                     arr_raw_viz[arr_bool].astype(np.float32) * 0.5
                     + np.array(tpl_c, dtype=np.float32) * 0.5
                 ).astype(np.uint8)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_raw_masks.png"), arr_raw_viz)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "05_pipeline_raw_masks.png"), arr_raw_viz)
 
+        # 06: 크기 기반 전구체/미분 분류 + 등가원
         if list_objects:
             arr_eq = self.draw_eq_circles_clean(arr_inputRoiBgr, list_objects, list_masks)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_eq_circles.png"), arr_eq)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "06_pipeline_classified.png"), arr_eq)
+
+        # 07: 최종 오버레이 + 하단 stats bar
+        arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "07_overlay_roi.png"), arr_overlay_with_stats)
+
+        # 08: 전체 이미지 오버레이
+        cv2.imwrite(str(self.obj_config.path_outputDir /
+                    "08_overlay_full.png"), arr_overlayFull)
+
+        # 하위 호환: 기존 파일명도 유지
+        cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi.png"), arr_overlayRoi)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "04_overlay_full.png"), arr_overlayFull)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
