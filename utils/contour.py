@@ -9,8 +9,20 @@ from utils.metrics import convert_pixels_to_micrometers
 
 CONST_FUSE_ANGLE_DEG: float = 15.0
 CONST_FUSE_OVERLAP_RATIO: float = 0.7
-CONST_FUSE_LONG_AXIS_THRESHOLD: float = 0.70
-CONST_FUSE_CONTAINMENT_THRESHOLD: float = 0.90
+
+# advanced_fuse 전용
+CONST_FUSE_CONTAINMENT_THRESHOLD: float = 0.70   # 작은 마스크가 큰 마스크에 70% 이상 포함 → 드롭
+CONST_FUSE_LONG_AXIS_THRESHOLD: float = 0.70     # 중심 변위의 장축 방향 성분 비율 >= 이 값 → 끝-끝
+CONST_FUSE_SHORT_OVERLAP_THRESHOLD: float = 0.70  # 단축 방향 투영 겹침 / min(t_i,t_j)
+
+
+def _proj_overlap(
+    float_c1: float, float_half1: float,
+    float_c2: float, float_half2: float,
+) -> float:
+    """두 1D 구간 [c-half, c+half]의 겹침 길이."""
+    return max(0.0, min(float_c1 + float_half1, float_c2 + float_half2)
+               - max(float_c1 - float_half1, float_c2 - float_half2))
 
 
 def fuse_contours(
@@ -22,24 +34,32 @@ def fuse_contours(
     float_scale_um: float,
     float_angle_tol_deg: float = CONST_FUSE_ANGLE_DEG,
     float_overlap_ratio: float = CONST_FUSE_OVERLAP_RATIO,
-    float_long_axis_threshold: tp.Optional[float] = None,
+    bool_advanced: bool = False,
 ) -> tp.Tuple[tp.List[PrimaryParticleMeasurement], tp.List[np.ndarray]]:
-    """Fuse contours (2D masks) that share long-axis direction and overlap significantly.
+    """Fuse contours (2D masks).
 
-    Two masks are fused when ALL conditions hold:
-      1. |angle_i - angle_j| (mod 180°) < float_angle_tol_deg
-      2. intersection_pixels / min(area_i, area_j) >= float_overlap_ratio
-      3. (advanced mode only) centroid displacement is NOT predominantly along the long
-         axis — i.e. d_long / dist < float_long_axis_threshold. This prevents fusing
-         end-to-end needles that happen to overlap at their tips.
+    --fuse (bool_advanced=False):
+        각도차 < angle_tol AND intersection/min_area >= overlap_ratio → 합침
 
-    Union-find handles chains of 3+ overlapping masks.
+    --advanced_fuse (bool_advanced=True):
+        조건 1 — 포함 필터: intersection/min_area >= 0.70 → 작은 마스크 드롭
+        조건 2 — 끝-끝 체인:
+            각도차 < angle_tol
+            AND 단축 방향 투영 겹침 / min(t_i,t_j) >= 0.70  (단면이 충분히 겹침)
+            AND 장축 방향 투영 겹침 > 0                       (장축이 실제로 닿음)
+            → 합침 (두께는 장축 길이 가중 평균)
     """
     n = len(list_objects)
     if n <= 1:
         return list_objects, list_masks
 
     arr_areas = np.array([float(m.sum()) for m in list_masks], dtype=np.float64)
+    arr_thickness = np.array([o.float_thicknessPx for o in list_objects], dtype=np.float64)
+    arr_longaxis = np.array([o.float_longAxisPx for o in list_objects], dtype=np.float64)
+    arr_angles = np.array([o.float_minRectAngle for o in list_objects], dtype=np.float32)
+    arr_cx = np.array([o.float_centroidX for o in list_objects], dtype=np.float64)
+    arr_cy = np.array([o.float_centroidY for o in list_objects], dtype=np.float64)
+
     parent = list(range(n))
 
     def _find(i: int) -> int:
@@ -48,66 +68,87 @@ def fuse_contours(
             i = parent[i]
         return i
 
-    # 벡터화된 bbox overlap 행렬 사전 계산
+    # bbox 겹침 + 각도 유사 후보 쌍 사전 계산
     arr_bx1 = np.array([o.int_bboxX for o in list_objects], dtype=np.int32)
     arr_by1 = np.array([o.int_bboxY for o in list_objects], dtype=np.int32)
     arr_bx2 = arr_bx1 + np.array([o.int_bboxWidth for o in list_objects], dtype=np.int32)
     arr_by2 = arr_by1 + np.array([o.int_bboxHeight for o in list_objects], dtype=np.int32)
-    arr_angles = np.array([o.float_minRectAngle for o in list_objects], dtype=np.float32)
-    arr_cx = np.array([o.float_centroidX for o in list_objects], dtype=np.float64)
-    arr_cy = np.array([o.float_centroidY for o in list_objects], dtype=np.float64)
 
     arr_bbox_ok = (
         (arr_bx2[:, None] > arr_bx1[None, :]) & (arr_bx2[None, :] > arr_bx1[:, None]) &
         (arr_by2[:, None] > arr_by1[None, :]) & (arr_by2[None, :] > arr_by1[:, None])
     )
-
     arr_adiff = np.abs(arr_angles[:, None] - arr_angles[None, :])
     arr_adiff = np.minimum(arr_adiff, 180.0 - arr_adiff)
     arr_angle_ok = arr_adiff < float_angle_tol_deg
-
     arr_candidate = np.triu(arr_bbox_ok & arr_angle_ok, k=1)
     list_pairs = list(zip(*np.where(arr_candidate)))
 
-    # advanced_fuse: masks that are >90% contained in a larger mask are dropped entirely
-    # (they're redundant sub-detections, not separate particles to be merged)
     set_drop: tp.Set[int] = set()
 
     for int_i, int_j in list_pairs:
         if int_i in set_drop or int_j in set_drop:
             continue
 
-        float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
-        if float_inter <= 0.0:
-            continue
-
-        float_smaller_area = min(arr_areas[int_i], arr_areas[int_j])
-        float_overlap = float_inter / max(float_smaller_area, 1.0)
-
-        # Advanced fuse containment check: drop the smaller if >90% inside the larger
-        if float_long_axis_threshold is not None:
-            if float_overlap >= CONST_FUSE_CONTAINMENT_THRESHOLD:
+        if bool_advanced:
+            # ── 조건 1: 포함 필터 ──────────────────────────────────────────
+            float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
+            if float_inter <= 0.0:
+                continue
+            float_area_small = min(arr_areas[int_i], arr_areas[int_j])
+            float_area_large = max(arr_areas[int_i], arr_areas[int_j])
+            float_containment = float_inter / max(float_area_small, 1.0)
+            # 크기가 비슷한 두 마스크(비율 > 0.7)는 포함 관계가 아님
+            bool_size_asymmetric = float_area_small / max(float_area_large, 1.0) <= 0.7
+            if float_containment >= CONST_FUSE_CONTAINMENT_THRESHOLD and bool_size_asymmetric:
                 int_small = int_i if arr_areas[int_i] <= arr_areas[int_j] else int_j
                 set_drop.add(int_small)
                 continue
 
-        if float_overlap < float_overlap_ratio:
-            continue
-
-        # Advanced fuse direction check: skip if displacement is predominantly along long axis
-        if float_long_axis_threshold is not None:
+            # ── 조건 2: 끝-끝 체인 ────────────────────────────────────────
             float_avg_rad = np.radians(
-                (float(arr_angles[int_i]) + float(arr_angles[int_j])) / 2.0
-            )
+                (float(arr_angles[int_i]) + float(arr_angles[int_j])) / 2.0)
+            float_cos = float(np.cos(float_avg_rad))
+            float_sin = float(np.sin(float_avg_rad))
+
+            # 2-1. 중심 변위가 장축 방향인지 (끝-끝 배열)
             float_dx = arr_cx[int_j] - arr_cx[int_i]
             float_dy = arr_cy[int_j] - arr_cy[int_i]
             float_dist = float(np.sqrt(float_dx ** 2 + float_dy ** 2))
             if float_dist > 1.0:
-                float_d_long = abs(
-                    float_dx * np.cos(float_avg_rad) + float_dy * np.sin(float_avg_rad)
-                )
-                if float_d_long / float_dist > float_long_axis_threshold:
-                    continue
+                float_d_long = abs(float_dx * float_cos + float_dy * float_sin)
+                if float_d_long / float_dist < CONST_FUSE_LONG_AXIS_THRESHOLD:
+                    continue  # 단축 방향으로 나란히 붙은 경우 → 합치지 않음
+
+            # 2-2. 장축 방향 투영 겹침 > 0 (실제로 닿아 있음)
+            float_long_ci = arr_cx[int_i] * float_cos + arr_cy[int_i] * float_sin
+            float_long_cj = arr_cx[int_j] * float_cos + arr_cy[int_j] * float_sin
+            float_long_overlap = _proj_overlap(
+                float_long_ci, arr_longaxis[int_i] / 2.0,
+                float_long_cj, arr_longaxis[int_j] / 2.0,
+            )
+            if float_long_overlap <= 0.0:
+                continue
+
+            # 2-3. 단축 방향 단면 겹침 (두 마스크의 단면이 정렬됨)
+            float_short_ci = -arr_cx[int_i] * float_sin + arr_cy[int_i] * float_cos
+            float_short_cj = -arr_cx[int_j] * float_sin + arr_cy[int_j] * float_cos
+            float_short_overlap = _proj_overlap(
+                float_short_ci, arr_thickness[int_i] / 2.0,
+                float_short_cj, arr_thickness[int_j] / 2.0,
+            )
+            float_min_t = min(arr_thickness[int_i], arr_thickness[int_j])
+            if float_short_overlap / max(float_min_t, 1.0) < CONST_FUSE_SHORT_OVERLAP_THRESHOLD:
+                continue
+
+        else:
+            # ── basic --fuse ───────────────────────────────────────────────
+            float_inter = float((list_masks[int_i] & list_masks[int_j]).sum())
+            if float_inter <= 0.0:
+                continue
+            float_smaller_area = min(arr_areas[int_i], arr_areas[int_j])
+            if float_inter / max(float_smaller_area, 1.0) < float_overlap_ratio:
+                continue
 
         pi, pj = _find(int_i), _find(int_j)
         if pi != pj:
@@ -138,9 +179,9 @@ def fuse_contours(
         arr_cnt = max(list_cnts, key=cv2.contourArea)
 
         rect = cv2.minAreaRect(arr_cnt)
-        (float_cx, float_cy), (float_rw, float_rh), _ = rect
+        (float_cx_new, float_cy_new), (float_rw, float_rh), _ = rect
         float_long = max(float_rw, float_rh)
-        float_short = min(float_rw, float_rh)
+        float_short_rect = min(float_rw, float_rh)
         if float_long < 1.0:
             continue
 
@@ -150,7 +191,17 @@ def fuse_contours(
         arr_vec = arr_bpts[1] - arr_bpts[0] if float_d01 >= float_d12 else arr_bpts[2] - arr_bpts[1]
         float_angle = float(np.degrees(np.arctan2(float(arr_vec[1]), float(arr_vec[0]))) % 180)
 
-        float_ar = float_short / max(float_long, 1.0)
+        # 두께: 장축 길이 가중 평균 (advanced) / minAreaRect 단축 (basic)
+        if bool_advanced:
+            float_weights = sum(arr_longaxis[k] for k in list_idx)
+            float_thickness_new = (
+                sum(arr_thickness[k] * arr_longaxis[k] for k in list_idx)
+                / max(float_weights, 1.0)
+            )
+        else:
+            float_thickness_new = float_short_rect
+
+        float_ar = float_thickness_new / max(float_long, 1.0)
         str_category = "acicular" if float_ar < float_acicular_threshold else "plate"
         if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
             continue
@@ -166,6 +217,7 @@ def fuse_contours(
         int_by = max(0, int_by)
         int_bw = max(0, min(int_x2, int_imgW) - int_bx)
         int_bh = max(0, min(int_y2, int_imgH) - int_by)
+
         list_new_objects.append(PrimaryParticleMeasurement(
             int_index=int_new_idx,
             str_category=str_category,
@@ -175,12 +227,12 @@ def fuse_contours(
             int_bboxY=int_by,
             int_bboxWidth=int_bw,
             int_bboxHeight=int_bh,
-            float_centroidX=float_cx,
-            float_centroidY=float_cy,
-            float_thicknessPx=float_short,
+            float_centroidX=float_cx_new,
+            float_centroidY=float_cy_new,
+            float_thicknessPx=float_thickness_new,
             float_longAxisPx=float_long,
             float_minRectAngle=float_angle,
-            float_thicknessUm=convert_pixels_to_micrometers(float_short, float_scale_pixels, float_scale_um),
+            float_thicknessUm=convert_pixels_to_micrometers(float_thickness_new, float_scale_pixels, float_scale_um),
             float_longAxisUm=convert_pixels_to_micrometers(float_long, float_scale_pixels, float_scale_um),
             float_aspectRatio=float_ar,
             int_longestHorizontal=int_bw,

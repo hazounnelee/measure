@@ -27,7 +27,7 @@ from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_opt
 from utils.histograms import save_primary_batch_histograms
 from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
 from utils.lsd import detect_acicular_lsd
-from utils.contour import fuse_contours, CONST_FUSE_LONG_AXIS_THRESHOLD
+from utils.contour import fuse_contours
 from utils.io import collect_input_groups, build_image_output_dir
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from services.sam2_service import Sam2AspectRatioService, CONST_SCALE_REFERENCE_WIDTH
@@ -1020,11 +1020,6 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 or self.obj_primary_config.bool_advancedFuseContours
             )
             if bool_do_fuse and list_objects:
-                float_long_thresh = (
-                    CONST_FUSE_LONG_AXIS_THRESHOLD
-                    if self.obj_primary_config.bool_advancedFuseContours
-                    else None
-                )
                 int_before = len(list_objects)
                 list_objects, list_validMasks = fuse_contours(
                     list_objects, list_validMasks,
@@ -1032,7 +1027,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     str_particle_type=self.obj_primary_config.str_particleType,
                     float_scale_pixels=self.obj_config.float_scalePixels,
                     float_scale_um=self.obj_config.float_scaleMicrometers,
-                    float_long_axis_threshold=float_long_thresh,
+                    bool_advanced=self.obj_primary_config.bool_advancedFuseContours,
                 )
                 str_mode = "advanced_fuse" if self.obj_primary_config.bool_advancedFuseContours else "fuse"
                 print(f"[{str_mode}] {int_before}개 → {len(list_objects)}개", flush=True)
@@ -1788,9 +1783,10 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         "--advanced_fuse",
         action=argparse.BooleanOptionalAction, default=False,
         help=(
-            "방향 인식 융합: --fuse 조건에 더해 단축 방향 겹침만 융합한다. "
-            "장축 방향(긴 쪽 끝-끝)으로 붙은 경우는 별개 입자로 보고 융합하지 않는다 "
-            f"(장축 변위 비율 > {int(CONST_FUSE_LONG_AXIS_THRESHOLD * 100)}%% → skip). 기본값: OFF."
+            "방향 인식 융합. 두 조건에서만 합침: "
+            "(1) 작은 마스크가 큰 마스크에 70%% 이상 포함 → 작은 마스크 드롭. "
+            "(2) 단축 방향 투영 겹침 >= 70%% AND 장축 방향 투영 겹침 > 0 (끝-끝 체인) → 합침. "
+            "기본값: OFF."
         ),
     )
     obj_parser.add_argument(

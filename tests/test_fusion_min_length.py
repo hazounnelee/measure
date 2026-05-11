@@ -141,7 +141,7 @@ assert n_fuse > n_no_fuse, "fuse 후 min_length가 no_fuse 보다 많아야 함 
 # E1=(100,100), E2=(100,104): displacement (0, +4)
 #   d_long = |0*cos90° + 4*sin90°| = 4 = dist → long_fraction=1.0 → 끝-끝 → skip
 
-from utils.contour import CONST_FUSE_LONG_AXIS_THRESHOLD
+
 
 obj_D1 = make_obj(0, cx=100, cy=100, length=40, width=10, angle_deg=90,
                   scale_px=SCALE_PX, scale_um=SCALE_UM)
@@ -162,31 +162,31 @@ print(f"\nD1/D2 mask overlap: {int((mask_D1 & mask_D2).sum())} px  "
 print(f"E1/E2 mask overlap: {int((mask_E1 & mask_E2).sum())} px  "
       f"ratio={float((mask_E1 & mask_E2).sum())/min(mask_E1.sum(), mask_E2.sum()):.2f}")
 
-# D1+D2: advanced_fuse → 1개 (단축 방향 겹침 → 융합)
+# D1+D2: 단축 방향 나란히 (dx=2) → advanced_fuse는 합치지 않음 (끝-끝 아님)
 adv_D, _ = fuse_contours(
     [obj_D1, obj_D2], [mask_D1, mask_D2],
     float_acicular_threshold=0.4,
     str_particle_type="acicular",
     float_scale_pixels=SCALE_PX,
     float_scale_um=SCALE_UM,
-    float_long_axis_threshold=CONST_FUSE_LONG_AXIS_THRESHOLD,
+    bool_advanced=True,
 )
-print(f"[Case 4a] D1+D2 (단축 겹침) advanced_fuse: 2 → {len(adv_D)}개  (기대 1)")
-assert len(adv_D) == 1, f"단축 겹침은 융합돼야 함, 실제 {len(adv_D)}개"
+print(f"[Case 4a] D1+D2 (단축 방향 나란히) advanced_fuse: 2 → {len(adv_D)}개  (기대 2)")
+assert len(adv_D) == 2, f"단축 방향 나란히는 advanced_fuse에서 합치지 않아야 함, 실제 {len(adv_D)}개"
 
-# E1+E2: advanced_fuse → 2개 (장축 끝-끝 → skip)
+# E1+E2: 장축 방향 끝-끝 → advanced_fuse에서 합침
 adv_E, _ = fuse_contours(
     [obj_E1, obj_E2], [mask_E1, mask_E2],
     float_acicular_threshold=0.4,
     str_particle_type="acicular",
     float_scale_pixels=SCALE_PX,
     float_scale_um=SCALE_UM,
-    float_long_axis_threshold=CONST_FUSE_LONG_AXIS_THRESHOLD,
+    bool_advanced=True,
 )
-print(f"[Case 4b] E1+E2 (장축 끝-끝)  advanced_fuse: 2 → {len(adv_E)}개  (기대 2)")
-assert len(adv_E) == 2, f"장축 끝-끝은 융합 안 돼야 함, 실제 {len(adv_E)}개"
+print(f"[Case 4b] E1+E2 (장축 끝-끝 체인) advanced_fuse: 2 → {len(adv_E)}개  (기대 1)")
+assert len(adv_E) == 1, f"장축 끝-끝 체인은 advanced_fuse에서 합쳐야 함, 실제 {len(adv_E)}개"
 
-# E1+E2: --fuse (방향 무시) → 1개 (끝-끝도 융합)
+# E1+E2: --fuse → 1개 (끝-끝도 융합)
 naive_E, _ = fuse_contours(
     [obj_E1, obj_E2], [mask_E1, mask_E2],
     float_acicular_threshold=0.4,
@@ -194,9 +194,8 @@ naive_E, _ = fuse_contours(
     float_scale_pixels=SCALE_PX,
     float_scale_um=SCALE_UM,
 )
-print(f"[Case 4c] E1+E2  --fuse (방향 무시): 2 → {len(naive_E)}개  (기대 1)")
+print(f"[Case 4c] E1+E2  --fuse: 2 → {len(naive_E)}개  (기대 1)")
 assert len(naive_E) == 1, f"--fuse 는 끝-끝도 융합해야 함, 실제 {len(naive_E)}개"
-assert len(adv_E) > len(naive_E), "advanced_fuse는 --fuse보다 끝-끝 입자를 더 많이 보존해야 함"
 
 # ── Case 5: containment filtering ────────────────────────────────────────────
 # F_big: 큰 침상, F_small: F_big 안에 90%+ 포함된 작은 침상 (동일 각도, 동일 위치)
@@ -226,7 +225,7 @@ adv_F, _ = fuse_contours(
     str_particle_type="acicular",
     float_scale_pixels=SCALE_PX,
     float_scale_um=SCALE_UM,
-    float_long_axis_threshold=CONST_FUSE_LONG_AXIS_THRESHOLD,
+    bool_advanced=True,
 )
 print(f"[Case 5a] F_big+F_small advanced_fuse: 2 → {len(adv_F)}개  (기대 1, F_small 필터링)")
 assert len(adv_F) == 1, f"containment 필터링으로 F_small이 제거돼야 함, 실제 {len(adv_F)}개"
