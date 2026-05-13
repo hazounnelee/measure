@@ -218,14 +218,19 @@ def save_secondary_batch_histograms(
     list_sizes: tp.List[float] = []
     list_sphs: tp.List[float] = []
     list_fine: tp.List[float] = []
+    list_size_stds: tp.List[float] = []  # img_id별 입도 표준편차
     for dict_g in (dict_batchSummary.get("img_ids") or []):
+        list_g_sizes: tp.List[float] = []
         for v in (dict_g.get("particle_size_um_raw") or []):
             try:
                 fv = float(v)
                 if not math.isnan(fv):
                     list_sizes.append(fv)
+                    list_g_sizes.append(fv)
             except (TypeError, ValueError):
                 pass
+        if len(list_g_sizes) >= 2:
+            list_size_stds.append(float(np.std(list_g_sizes, ddof=1)))
         for v in (dict_g.get("particle_sphericity_raw") or []):
             try:
                 fv = float(v)
@@ -243,9 +248,10 @@ def save_secondary_batch_histograms(
                 except (TypeError, ValueError):
                     pass
 
-    float_size_xmin, float_size_xmax = _std_xlim(list_sizes)
-    float_sph_xmin,  float_sph_xmax  = _std_xlim(list_sphs)
-    float_fine_xmin, float_fine_xmax = _std_xlim(list_fine)
+    float_size_xmin,     float_size_xmax     = _std_xlim(list_sizes)
+    float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs)
+    float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
+    float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
 
     _save_batch_hist(
         list_vals=list_sizes,
@@ -255,6 +261,15 @@ def save_secondary_batch_histograms(
         str_color="#5588ff",
         str_unit=" µm",
         float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
+    )
+    _save_batch_hist(
+        list_vals=list_size_stds,
+        path_output=path_outputDir / "batch_hist_size_std.png",
+        str_title=f"{str_prefix}Particle Size Std per IMG_ID — Batch Distribution",
+        str_xlabel="Size Std (µm)",
+        str_color="#2266cc",
+        str_unit=" µm",
+        float_xlim_min=float_size_std_xmin, float_xlim_max=float_size_std_xmax,
     )
     _save_batch_hist(
         list_vals=list_sphs,
