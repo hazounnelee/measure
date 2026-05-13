@@ -243,6 +243,10 @@ def save_secondary_batch_histograms(
                 except (TypeError, ValueError):
                     pass
 
+    float_size_xmin, float_size_xmax = _std_xlim(list_sizes)
+    float_sph_xmin,  float_sph_xmax  = _std_xlim(list_sphs)
+    float_fine_xmin, float_fine_xmax = _std_xlim(list_fine)
+
     _save_batch_hist(
         list_vals=list_sizes,
         path_output=path_outputDir / "batch_hist_size.png",
@@ -250,6 +254,7 @@ def save_secondary_batch_histograms(
         str_xlabel="Equivalent Diameter (µm)",
         str_color="#5588ff",
         str_unit=" µm",
+        float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
     )
     _save_batch_hist(
         list_vals=list_sphs,
@@ -258,7 +263,7 @@ def save_secondary_batch_histograms(
         str_xlabel="Sphericity",
         str_color="#44cc44",
         str_unit="",
-        float_xlim_min=0.0, float_xlim_max=1.0,
+        float_xlim_min=float_sph_xmin, float_xlim_max=float_sph_xmax,
     )
     _save_batch_hist(
         list_vals=list_fine,
@@ -267,30 +272,21 @@ def save_secondary_batch_histograms(
         str_xlabel="Fine Particle Ratio (%)",
         str_color="#ff6622",
         str_unit="%",
-        float_xlim_min=0.0,
+        float_xlim_min=float_fine_xmin, float_xlim_max=float_fine_xmax,
     )
 
 
-def _iqr_xlim(
+def _std_xlim(
     list_vals: tp.List[float],
-    float_k: float = 2.0,
-    float_hard_min: tp.Optional[float] = None,
-    float_hard_max: tp.Optional[float] = None,
+    float_z: float = 1.96,
 ) -> tp.Tuple[tp.Optional[float], tp.Optional[float]]:
-    """Return (xmin, xmax) clipped to Q1 - k*IQR … Q3 + k*IQR."""
+    """Return (xmin, xmax) as mean ± z*std (default z=1.96 for 95%)."""
     if len(list_vals) < 4:
-        return float_hard_min, float_hard_max
+        return None, None
     arr = np.array(list_vals, dtype=np.float64)
-    float_q1 = float(np.percentile(arr, 25))
-    float_q3 = float(np.percentile(arr, 75))
-    float_iqr = float_q3 - float_q1
-    float_lo = float_q1 - float_k * float_iqr
-    float_hi = float_q3 + float_k * float_iqr
-    if float_hard_min is not None:
-        float_lo = max(float_lo, float_hard_min)
-    if float_hard_max is not None:
-        float_hi = min(float_hi, float_hard_max)
-    return float_lo, float_hi
+    float_mean = float(np.mean(arr))
+    float_std = float(np.std(arr))
+    return float_mean - float_z * float_std, float_mean + float_z * float_std
 
 
 def save_primary_batch_histograms(
@@ -334,9 +330,6 @@ def save_primary_batch_histograms(
                     except (TypeError, ValueError):
                         pass
 
-    float_density_xmin, float_density_xmax = _iqr_xlim(
-        list_densities, float_k=2.0, float_hard_min=0.0, float_hard_max=1.0)
-
     _save_batch_hist(
         list_vals=list_thickness,
         path_output=path_outputDir / "batch_hist_thickness.png",
@@ -344,6 +337,7 @@ def save_primary_batch_histograms(
         str_xlabel="Thickness (µm)",
         str_color="#9944ee",
         str_unit=" µm",
+        **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_thickness)))),
     )
     _save_batch_hist(
         list_vals=list_densities,
@@ -352,6 +346,5 @@ def save_primary_batch_histograms(
         str_xlabel="ROI Density (foreground fraction)",
         str_color="#ff8844",
         str_unit="",
-        float_xlim_min=float_density_xmin,
-        float_xlim_max=float_density_xmax,
+        **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_densities)))),
     )
