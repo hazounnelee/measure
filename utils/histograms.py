@@ -223,7 +223,14 @@ def save_secondary_batch_histograms(
     list_size_stds: tp.List[float] = []  # img_id별 입도 표준편차
     for dict_g in (dict_batchSummary.get("img_ids") or []):
         list_g_sizes: tp.List[float] = []
-        for v in (dict_g.get("particle_size_um_raw") or []):
+
+        # img_id 레벨에 raw 리스트가 있으면 직접 읽고, 없으면 files에서 수집
+        list_raw_src = dict_g.get("particle_size_um_raw") or []
+        if not list_raw_src:
+            for dict_f in (dict_g.get("files") or []):
+                list_raw_src.extend(dict_f.get("particle_size_um_raw") or [])
+
+        for v in list_raw_src:
             try:
                 fv = float(v)
                 if not math.isnan(fv):
@@ -384,7 +391,7 @@ def save_lot_particle_scatter_histogram(
     list_particle_sizes: tp.List[float] = []
     list_fragment_sizes: tp.List[float] = []
 
-    for path_csv in sorted(path_lot_dir.glob("*/objects.csv")):
+    for path_csv in sorted(path_lot_dir.glob("**/objects.csv")):
         try:
             with path_csv.open(encoding="utf-8-sig") as obj_f:
                 for dict_row in csv.DictReader(obj_f):
@@ -403,6 +410,8 @@ def save_lot_particle_scatter_histogram(
 
     list_all = list_particle_sizes + list_fragment_sizes
     if not list_all:
+        import sys
+        print(f"[WARN] {path_lot_dir} 에서 입자 데이터를 찾지 못했습니다. objects.csv 경로를 확인하세요.", file=sys.stderr)
         return
 
     float_xmin, float_xmax = _std_xlim(list_all)
