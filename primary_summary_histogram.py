@@ -48,7 +48,7 @@ def main() -> None:
 
     save_primary_batch_histograms(dict_batchSummary, path_outputDir, str_lot=str_lot)
 
-    print("[done] batch_hist_thickness.png, batch_hist_density.png 저장 완료")
+    print("[done] batch_hist_thickness.png, batch_hist_thickness_per_image.png, batch_hist_density.png 저장 완료")
 
 
 if __name__ == "__main__":

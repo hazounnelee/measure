@@ -220,26 +220,17 @@ def save_secondary_batch_histograms(
     list_sizes: tp.List[float] = []
     list_sphs: tp.List[float] = []
     list_fine: tp.List[float] = []
-    list_size_stds: tp.List[float] = []  # img_id별 입도 표준편차
+    list_size_stds: tp.List[float] = []      # 이미지(파일)별 입도 표준편차
+    list_size_per_image: tp.List[float] = [] # 이미지(파일)별 평균 입도
+    list_sph_per_image: tp.List[float] = []  # 이미지(파일)별 평균 구형도
     for dict_g in (dict_batchSummary.get("img_ids") or []):
-        list_g_sizes: tp.List[float] = []
-
-        # img_id 레벨에 raw 리스트가 있으면 직접 읽고, 없으면 files에서 수집
-        list_raw_src = dict_g.get("particle_size_um_raw") or []
-        if not list_raw_src:
-            for dict_f in (dict_g.get("files") or []):
-                list_raw_src.extend(dict_f.get("particle_size_um_raw") or [])
-
-        for v in list_raw_src:
+        for v in (dict_g.get("particle_size_um_raw") or []):
             try:
                 fv = float(v)
                 if not math.isnan(fv):
                     list_sizes.append(fv)
-                    list_g_sizes.append(fv)
             except (TypeError, ValueError):
                 pass
-        if len(list_g_sizes) >= 2:
-            list_size_stds.append(float(np.std(list_g_sizes, ddof=1)))
         for v in (dict_g.get("particle_sphericity_raw") or []):
             try:
                 fv = float(v)
@@ -248,6 +239,49 @@ def save_secondary_batch_histograms(
             except (TypeError, ValueError):
                 pass
         for dict_f in (dict_g.get("files") or []):
+            # per-particle raw (fallback if img_id level is absent)
+            if not dict_g.get("particle_size_um_raw"):
+                for v in (dict_f.get("particle_size_um_raw") or []):
+                    try:
+                        fv = float(v)
+                        if not math.isnan(fv):
+                            list_sizes.append(fv)
+                    except (TypeError, ValueError):
+                        pass
+
+            # std: prefer pre-computed per-file value, fallback to raw
+            v_std = dict_f.get("particle_size_std_um")
+            if v_std is not None:
+                try:
+                    fv = float(v_std)
+                    if not math.isnan(fv):
+                        list_size_stds.append(fv)
+                except (TypeError, ValueError):
+                    pass
+            else:
+                list_raw = [float(r) for r in (dict_f.get("particle_size_um_raw") or [])
+                            if not math.isnan(float(r))]
+                if len(list_raw) >= 2:
+                    list_size_stds.append(float(np.std(list_raw, ddof=1)))
+
+            # per-image mean
+            v = dict_f.get("particle_mean_size_um")
+            if v is not None:
+                try:
+                    fv = float(v)
+                    if not math.isnan(fv):
+                        list_size_per_image.append(fv)
+                except (TypeError, ValueError):
+                    pass
+            v = dict_f.get("particle_sphericity_mean")
+            if v is not None:
+                try:
+                    fv = float(v)
+                    if not math.isnan(fv):
+                        list_sph_per_image.append(fv)
+                except (TypeError, ValueError):
+                    pass
+
             v = dict_f.get("fine_particle_ratio_percent")
             if v is not None:
                 try:
@@ -262,11 +296,14 @@ def save_secondary_batch_histograms(
     float_sph_xmax = min(float_sph_xmax, 1.0) if float_sph_xmax is not None else 1.0
     float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
     float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
+    float_size_pi_xmin,  float_size_pi_xmax  = _std_xlim(list_size_per_image)
+    float_sph_pi_xmin,   float_sph_pi_xmax   = _std_xlim(list_sph_per_image)
+    float_sph_pi_xmax = min(float_sph_pi_xmax, 1.0) if float_sph_pi_xmax is not None else 1.0
 
     _save_batch_hist(
         list_vals=list_sizes,
         path_output=path_outputDir / "batch_hist_size.png",
-        str_title=f"{str_prefix}Particle Size — Batch Distribution",
+        str_title=f"{str_prefix}Particle Size — Batch Distribution (per particle)",
         str_xlabel="Equivalent Diameter (µm)",
         str_color="#5588ff",
         str_unit=" µm",
@@ -274,9 +311,19 @@ def save_secondary_batch_histograms(
         int_bins_factor=5,
     )
     _save_batch_hist(
+        list_vals=list_size_per_image,
+        path_output=path_outputDir / "batch_hist_size_per_image.png",
+        str_title=f"{str_prefix}Particle Size — Batch Distribution (per-image mean)",
+        str_xlabel="Mean Equivalent Diameter (µm)",
+        str_color="#3366cc",
+        str_unit=" µm",
+        float_xlim_min=float_size_pi_xmin, float_xlim_max=float_size_pi_xmax,
+        int_bins_factor=3,
+    )
+    _save_batch_hist(
         list_vals=list_size_stds,
         path_output=path_outputDir / "batch_hist_size_std.png",
-        str_title=f"{str_prefix}Particle Size Std per IMG_ID — Batch Distribution",
+        str_title=f"{str_prefix}Particle Size Std per Image — Batch Distribution",
         str_xlabel="Size Std (µm)",
         str_color="#2266cc",
         str_unit=" µm",
@@ -285,11 +332,20 @@ def save_secondary_batch_histograms(
     _save_batch_hist(
         list_vals=list_sphs,
         path_output=path_outputDir / "batch_hist_sphericity.png",
-        str_title=f"{str_prefix}Sphericity — Batch Distribution",
+        str_title=f"{str_prefix}Sphericity — Batch Distribution (per particle)",
         str_xlabel="Sphericity",
         str_color="#44cc44",
         str_unit="",
         float_xlim_min=float_sph_xmin, float_xlim_max=float_sph_xmax,
+    )
+    _save_batch_hist(
+        list_vals=list_sph_per_image,
+        path_output=path_outputDir / "batch_hist_sphericity_per_image.png",
+        str_title=f"{str_prefix}Sphericity — Batch Distribution (per-image mean)",
+        str_xlabel="Mean Sphericity",
+        str_color="#229922",
+        str_unit="",
+        float_xlim_min=float_sph_pi_xmin, float_xlim_max=float_sph_pi_xmax,
     )
     _save_batch_hist(
         list_vals=list_fine,
@@ -335,6 +391,20 @@ def save_primary_batch_histograms(
         except (TypeError, ValueError):
             pass
 
+    list_thickness_per_image: tp.List[float] = []
+    for dict_g in (dict_batchSummary.get("img_ids") or []):
+        for dict_f in (dict_g.get("files") or []):
+            dict_th = dict_f.get("all_primary_thickness_um")
+            if isinstance(dict_th, dict):
+                v = dict_th.get("mean")
+                if v is not None:
+                    try:
+                        fv = float(v)
+                        if not math.isnan(fv):
+                            list_thickness_per_image.append(fv)
+                    except (TypeError, ValueError):
+                        pass
+
     # density: prefer pre-pooled raw list, fall back to img_id file traversal
     list_densities: tp.List[float] = []
     for v in (dict_batchSummary.get("roi_density_raw") or []):
@@ -359,11 +429,20 @@ def save_primary_batch_histograms(
     _save_batch_hist(
         list_vals=list_thickness,
         path_output=path_outputDir / "batch_hist_thickness.png",
-        str_title=f"{str_prefix}Primary Particle Thickness — Batch Distribution",
+        str_title=f"{str_prefix}Primary Particle Thickness — Batch Distribution (per particle)",
         str_xlabel="Thickness (µm)",
         str_color="#9944ee",
         str_unit=" µm",
         **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_thickness)))),
+    )
+    _save_batch_hist(
+        list_vals=list_thickness_per_image,
+        path_output=path_outputDir / "batch_hist_thickness_per_image.png",
+        str_title=f"{str_prefix}Primary Particle Thickness — Batch Distribution (per-image mean)",
+        str_xlabel="Mean Thickness (µm)",
+        str_color="#7722bb",
+        str_unit=" µm",
+        **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_thickness_per_image)))),
     )
     _save_batch_hist(
         list_vals=list_densities,

@@ -47,7 +47,8 @@ def main() -> None:
     print(f"[info] lot    : {str_lot}")
 
     save_secondary_batch_histograms(dict_batchSummary, path_outputDir, str_lot=str_lot)
-    print("[done] batch_hist_size.png, batch_hist_size_std.png, batch_hist_sphericity.png, batch_hist_fine_ratio.png 저장 완료")
+    print("[done] batch_hist_size.png, batch_hist_size_per_image.png, batch_hist_size_std.png, "
+          "batch_hist_sphericity.png, batch_hist_sphericity_per_image.png, batch_hist_fine_ratio.png 저장 완료")
 
 
 if __name__ == "__main__":
