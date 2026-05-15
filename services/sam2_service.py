@@ -902,7 +902,7 @@ class Sam2AspectRatioService:
             dict_summary.update({
                 "particle_mean_size_um": float(np.mean(arr_sizes)),
                 "particle_size_median_um": float(np.median(arr_sizes)),
-                "particle_size_std_um": float(np.std(arr_sizes)),
+                "particle_size_std_um": float(np.std(arr_sizes, ddof=1)) if len(arr_sizes) >= 2 else None,
                 "particle_size_min_um": float(np.min(arr_sizes)),
                 "particle_size_max_um": float(np.max(arr_sizes)),
                 "particle_size_um_raw": [float(v) for v in list_particleSizes],
