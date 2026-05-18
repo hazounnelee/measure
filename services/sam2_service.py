@@ -13,7 +13,7 @@ import yaml
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
-from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points
+from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points, sample_prompt_points
 from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
@@ -315,27 +315,22 @@ class Sam2AspectRatioService:
 
         for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
             arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
-            list_promptBatches: tp.List[tp.Optional[tp.Sequence[tp.Tuple[int, int]]]] = [
-                None]
-            list_points: tp.List[tp.Tuple[int, int]] = []
+            list_posPoints: tp.List[tp.Tuple[int, int]] = []
+            list_negPoints: tp.List[tp.Tuple[int, int]] = []
 
             if self.obj_config.bool_usePointPrompts:
-                arr_tileGray = arr_inputGray[int_ty1:int_ty2,
-                                             int_tx1:int_tx2].copy()
+                arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
                 try:
-                    list_points = sample_interest_points(
+                    list_posPoints, list_negPoints = sample_prompt_points(
                         arr_tileGray=arr_tileGray,
-                        int_maxPoints=self.obj_config.int_pointsPerTile,
+                        int_maxParticles=self.obj_config.int_pointsPerTile,
                         int_minDist=self.obj_config.int_pointMinDistance,
-                        float_qualityLevel=self.obj_config.float_pointQualityLevel,
+                        int_numNegative=self.obj_config.int_numNegativePoints,
                     )
                 except Exception as exc:
                     print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
-                    list_points = []
-                list_promptBatches = list(iter_chunks(
-                    list_points, max(1, self.obj_config.int_pointBatchSize)))
 
-                for int_px, int_py in list_points:
+                for int_px, int_py in list_posPoints:
                     int_candidateCount += 1
                     list_debugPoints.append(
                         {
@@ -343,6 +338,17 @@ class Sam2AspectRatioService:
                             "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
                             "point_xy_tile": [int(int_px), int(int_py)],
                             "point_xy_roi": [int_tx1 + int(int_px), int_ty1 + int(int_py)],
+                            "label": 1,
+                        }
+                    )
+                for int_px, int_py in list_negPoints:
+                    list_debugPoints.append(
+                        {
+                            "tile_index": int_tileIdx,
+                            "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
+                            "point_xy_tile": [int(int_px), int(int_py)],
+                            "point_xy_roi": [int_tx1 + int(int_px), int_ty1 + int(int_py)],
+                            "label": 0,
                         }
                     )
 
@@ -350,21 +356,26 @@ class Sam2AspectRatioService:
                 {
                     "tile_index": int_tileIdx,
                     "tile_xyxy": [int_tx1, int_ty1, int_tx2, int_ty2],
-                    "num_points": len(list_points),
+                    "num_points": len(list_posPoints),
+                    "num_negative_points": len(list_negPoints),
                     "use_point_prompts": bool(self.obj_config.bool_usePointPrompts),
                 }
             )
 
-            for list_pointChunk in list_promptBatches:
+            # positive 포인트 하나씩 + 공유 negative 포인트로 SAM2 호출
+            list_promptIter: tp.List[tp.Optional[tp.Tuple[int, int]]] = (
+                list_posPoints if self.obj_config.bool_usePointPrompts else [None])
+
+            for tpl_pos in list_promptIter:
                 try:
                     if self.obj_config.bool_usePointPrompts:
-                        if len(list_pointChunk) == 0:
-                            continue
+                        arr_pts = [[int(tpl_pos[0]), int(tpl_pos[1])]] + [
+                            [int(nx), int(ny)] for nx, ny in list_negPoints]
+                        arr_labels = [1] + [0] * len(list_negPoints)
                         list_results = self.obj_model(  # type: ignore[misc]
                             source=arr_tileBgr,
-                            points=[[int_px, int_py]
-                                    for int_px, int_py in list_pointChunk],
-                            labels=[1] * len(list_pointChunk),
+                            points=arr_pts,
+                            labels=arr_labels,
                             **dict_predictCommon,
                         )
                     else:
@@ -855,6 +866,7 @@ class Sam2AspectRatioService:
             "point_min_distance": int(self.obj_config.int_pointMinDistance),
             "point_quality_level": float(self.obj_config.float_pointQualityLevel),
             "point_batch_size": int(self.obj_config.int_pointBatchSize),
+            "num_negative_points": int(self.obj_config.int_numNegativePoints),
             "dedup_iou": float(self.obj_config.float_dedupIou),
             "bbox_dedup_iou": float(self.obj_config.float_bboxDedupIou),
             "use_point_prompts": bool(self.obj_config.bool_usePointPrompts),
@@ -1004,14 +1016,16 @@ class Sam2AspectRatioService:
                               (200, 200, 0), 1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "03_pipeline_tiles.png"), arr_tiles_viz)
 
-        # 04: 포인트 프롬프트
+        # 04: 포인트 프롬프트 (positive=cyan, negative=red)
         list_pts = dict_debug.get("candidate_points", [])
         if list_pts:
             arr_pts_viz = arr_inputRoiBgr.copy()
             for dict_pt in list_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_pts_viz, (int_px, int_py), 3, (0, 255, 255), -1)
+                int_label = dict_pt.get("label", 1)
+                tpl_color = (0, 255, 255) if int_label == 1 else (0, 0, 255)
+                cv2.circle(arr_pts_viz, (int_px, int_py), 3, tpl_color, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "04_pipeline_point_prompts.png"), arr_pts_viz)
 
         # 05: 탐지된 원시 마스크 전체

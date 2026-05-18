@@ -189,6 +189,74 @@ def sample_interest_points(
     return np.array([[int_w / 2.0, int_h / 2.0]], dtype=np.float32)
 
 
+def sample_prompt_points(
+    arr_tileGray: np.ndarray,
+    int_maxParticles: int,
+    int_minDist: int,
+    int_numNegative: int = 3,
+) -> tp.Tuple[tp.List[tp.Tuple[int, int]], tp.List[tp.Tuple[int, int]]]:
+    """Return (positive, negative) point lists for SAM2 prompting.
+
+    Positive: distance-transform peak inside each foreground blob — one interior
+    point per particle, guaranteed not to be on the boundary.
+    Negative: points uniformly sampled from the clearly-background region (after
+    erosion), so SAM2 suppresses background mask expansion.
+    """
+    int_h, int_w = arr_tileGray.shape[:2]
+
+    # ── foreground mask via Otsu ────────────────────────────────────────────
+    arr_blur = cv2.GaussianBlur(arr_tileGray, (5, 5), 0)
+    _, arr_fg = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Ensure foreground = minority (particles are usually the smaller area)
+    if float(arr_fg.sum()) / (255.0 * int_h * int_w) > 0.5:
+        arr_fg = cv2.bitwise_not(arr_fg)
+    arr_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_CLOSE, arr_kernel, iterations=2)
+    arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_OPEN,  arr_kernel, iterations=1)
+
+    # ── positive: distance-transform peak per connected blob ────────────────
+    int_numLabels, arr_labels = cv2.connectedComponents(arr_fg)
+    arr_dist = cv2.distanceTransform(arr_fg, cv2.DIST_L2, 5)
+
+    list_positive: tp.List[tp.Tuple[int, int]] = []
+    arr_used = np.empty((0, 2), dtype=np.float32)
+
+    for int_label in range(1, int_numLabels):
+        if len(list_positive) >= int_maxParticles:
+            break
+        arr_blob_mask = (arr_labels == int_label).astype(np.uint8)
+        if float(arr_blob_mask.sum()) < 20:
+            continue
+        # peak of distance transform = deepest interior point
+        arr_blob_dist = arr_dist * arr_blob_mask.astype(np.float32)
+        int_peak_idx = int(np.argmax(arr_blob_dist))
+        int_py, int_px = divmod(int_peak_idx, int_w)
+        # enforce min distance from already-selected positive points
+        if arr_used.shape[0] > 0:
+            if float(np.linalg.norm(arr_used - [int_px, int_py], axis=1).min()) < int_minDist:
+                continue
+        list_positive.append((int_px, int_py))
+        arr_used = np.vstack([arr_used, [[int_px, int_py]]])
+
+    # fallback: tile center
+    if not list_positive:
+        list_positive = [(int_w // 2, int_h // 2)]
+
+    # ── negative: uniformly spread points in eroded background ─────────────
+    arr_bg = cv2.bitwise_not(arr_fg)
+    arr_bg_eroded = cv2.erode(arr_bg, arr_kernel, iterations=4)
+    arr_bg_coords = np.column_stack(np.where(arr_bg_eroded > 0))  # (row, col)
+
+    list_negative: tp.List[tp.Tuple[int, int]] = []
+    if arr_bg_coords.shape[0] > 0 and int_numNegative > 0:
+        arr_idx = np.linspace(0, arr_bg_coords.shape[0] - 1, int_numNegative, dtype=int)
+        for idx in arr_idx:
+            int_py, int_px = int(arr_bg_coords[idx, 0]), int(arr_bg_coords[idx, 1])
+            list_negative.append((int_px, int_py))
+
+    return list_positive, list_negative
+
+
 def detect_sphere_roi(
     arr_image_bgr: np.ndarray,
     float_cap_fraction: float = 0.65,

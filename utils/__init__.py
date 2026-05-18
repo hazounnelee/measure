@@ -9,6 +9,7 @@ from utils.image import (
     create_processing_tiles,
     enhance_image_texture,
     sample_interest_points,
+    sample_prompt_points,
     detect_sphere_roi,
     compute_center_roi,
 )

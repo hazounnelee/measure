@@ -31,6 +31,7 @@ class Sam2AspectRatioConfig:
     int_pointMinDistance: int = 14
     float_pointQualityLevel: float = 0.03
     int_pointBatchSize: int = 32
+    int_numNegativePoints: int = 3
     float_dedupIou: float = 0.60
     float_bboxDedupIou: float = 0.85
     bool_usePointPrompts: bool = True
