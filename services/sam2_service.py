@@ -1233,9 +1233,9 @@ class Sam2AspectRatioService:
         )
 
         cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "01_input.png"), arr_inputBgr)
+                    "input.png"), arr_inputBgr)
         cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "02_input_roi.png"), arr_inputRoiBgr)
+                    "input_roi.png"), arr_inputRoiBgr)
 
         # ── 파이프라인 단계별 이미지 (순서대로) ───────────────────────────────
 
@@ -1247,7 +1247,7 @@ class Sam2AspectRatioService:
                 int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
                 cv2.rectangle(arr_tiles_viz, (int_tx1, int_ty1), (int_tx2, int_ty2),
                               (200, 200, 0), 1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "03_pipeline_tiles.png"), arr_tiles_viz)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
 
         # 04: 포인트 프롬프트 (positive=cyan, negative=red)
         list_pts = dict_debug.get("candidate_points", [])
@@ -1259,7 +1259,7 @@ class Sam2AspectRatioService:
                 int_label = dict_pt.get("label", 1)
                 tpl_color = (0, 255, 255) if int_label == 1 else (255, 255, 0)
                 cv2.circle(arr_pts_viz, (int_px, int_py), 3, tpl_color, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "04_pipeline_point_prompts.png"), arr_pts_viz)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "prompts.png"), arr_pts_viz)
 
         # 05: 탐지된 원시 마스크 전체
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
@@ -1274,24 +1274,16 @@ class Sam2AspectRatioService:
                     arr_raw_viz[arr_bool].astype(np.float32) * 0.5
                     + np.array(tpl_c, dtype=np.float32) * 0.5
                 ).astype(np.uint8)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "05_pipeline_raw_masks.png"), arr_raw_viz)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "masks_raw.png"), arr_raw_viz)
 
         # 06: 크기 기반 전구체/미분 분류 + 등가원
         if list_objects:
             arr_eq = self.draw_eq_circles_clean(arr_inputRoiBgr, list_objects, list_masks)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "06_pipeline_classified.png"), arr_eq)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "classified.png"), arr_eq)
 
-        # 07: 최종 오버레이 + 하단 stats bar
         arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "07_overlay_roi.png"), arr_overlay_with_stats)
-
-        # 08: 전체 이미지 오버레이
-        cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "08_overlay_full.png"), arr_overlayFull)
-
-        # 하위 호환: 기존 파일명도 유지
-        cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi.png"), arr_overlayRoi)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "04_overlay_full.png"), arr_overlayFull)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay.png"), arr_overlayFull)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
@@ -1316,20 +1308,20 @@ class Sam2AspectRatioService:
         try:
             save_particle_distribution_histogram(
                 path_particlesCsv=path_csvParticle,
-                path_outputImage=self.obj_config.path_outputDir / "particle_dist.png",
+                path_outputImage=self.obj_config.path_outputDir / "size_dist.png",
                 path_inputImage=self.obj_config.path_input,
             )
         except Exception as exc:
-            print(f"[WARN] particle_dist.png 저장 실패: {exc}", flush=True)
+            print(f"[WARN] size_dist.png 저장 실패: {exc}", flush=True)
 
         try:
             save_sphericity_distribution_histogram(
                 path_particlesCsv=path_csvParticle,
-                path_outputImage=self.obj_config.path_outputDir / "sphericity_dist.png",
+                path_outputImage=self.obj_config.path_outputDir / "sph_dist.png",
                 path_inputImage=self.obj_config.path_input,
             )
         except Exception as exc:
-            print(f"[WARN] sphericity_dist.png 저장 실패: {exc}", flush=True)
+            print(f"[WARN] sph_dist.png 저장 실패: {exc}", flush=True)
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
             json_dump_safe(dict_summary, obj_f)
@@ -1441,16 +1433,16 @@ class Sam2AspectRatioService:
         )
 
         # ── 파이프라인 단계별 이미지 저장 (save_outputs에서 이미 디렉토리 생성됨) ──
-        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_clahe.png"), arr_clahe)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_binary.png"), arr_binary)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "clahe.png"), arr_clahe)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "binary.png"), arr_binary)
         arr_dist_viz = cv2.normalize(arr_dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         cv2.imwrite(
-            str(self.obj_config.path_outputDir / "pipeline_dist.png"),
+            str(self.obj_config.path_outputDir / "dist.png"),
             cv2.applyColorMap(arr_dist_viz, cv2.COLORMAP_JET),
         )
         arr_ws_viz = arr_inputRoiBgr.copy()
         arr_ws_viz[arr_markers == -1] = [0, 0, 255]
-        cv2.imwrite(str(self.obj_config.path_outputDir / "pipeline_watershed.png"), arr_ws_viz)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "watershed.png"), arr_ws_viz)
 
         return Sam2AspectRatioResult(list_objects=list_objects, dict_summary=dict_summary)
 
