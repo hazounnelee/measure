@@ -537,45 +537,55 @@ class Sam2AspectRatioService:
         return arr_out
 
     @staticmethod
-    def _fit_particle_ellipse(
-        arr_mask: np.ndarray,
-    ) -> tp.Optional[tp.Tuple[tp.Tuple[float, float], tp.Tuple[float, float], float]]:
-        """가시 영역 컨투어에 타원을 피팅한다.
+    def _fit_particle_circle(arr_mask: np.ndarray) -> tp.Optional[tp.Tuple[float, float, float]]:
+        """가시 영역 컨투어의 convex hull에 Kasa 원 피팅을 수행한다.
 
-        Returns ((cx, cy), (width, height), angle_deg) or None.
-        - width/height 는 cv2.fitEllipse 기준 전체 축 길이 (직경).
-        - 피팅 타원 면적이 마스크 면적의 4배 초과 시 이상 피팅으로 판단해 None 반환.
+        여러 개의 노치가 있어도 hull 전체를 사용하므로 안정적.
+        Returns (cx, cy, r) or None if fitting fails / sanity check fails.
         """
         list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         if not list_cnts:
             return None
         arr_cnt = max(list_cnts, key=cv2.contourArea)
         float_area = float(cv2.contourArea(arr_cnt))
-        if float_area == 0 or len(arr_cnt) < 5:
+        if float_area == 0:
             return None
 
         arr_hull = cv2.convexHull(arr_cnt)
         float_hull_area = float(cv2.contourArea(arr_hull))
-        if float_hull_area / max(float_area, 1.0) > 2.0:
-            # 심하게 불규칙한 형태 → skip
+        float_solidity = float_area / max(float_hull_area, 1.0)
+        # solidity < 0.50: 심하게 불규칙(fragment) → skip
+        # 상한은 두지 않음: gain > 1.02 체크가 자연 상한 역할
+        # (solidity > 1/1.02 ≈ 0.98 이면 gain < 1.02 → 어차피 복원 안 됨)
+        if float_solidity < 0.50:
             return None
 
-        tpl_center, tpl_axes, float_angle = cv2.fitEllipse(arr_cnt)
-        float_a = max(tpl_axes) / 2.0
-        float_b = min(tpl_axes) / 2.0
-        if float_a <= 0 or float_b <= 0:
+        # Kasa 최소제곱 원 피팅 (hull 포인트만 사용)
+        arr_pts = arr_hull.reshape(-1, 2).astype(np.float64)
+        arr_z = arr_pts[:, 0] ** 2 + arr_pts[:, 1] ** 2
+        arr_A = np.column_stack([2.0 * arr_pts[:, 0], 2.0 * arr_pts[:, 1], np.ones(len(arr_pts))])
+        arr_res, _, _, _ = np.linalg.lstsq(arr_A, arr_z, rcond=None)
+        float_cx = float(arr_res[0])
+        float_cy = float(arr_res[1])
+        float_r2 = float(arr_res[2]) + float_cx ** 2 + float_cy ** 2
+        if float_r2 <= 0:
+            return None
+        float_r = float(np.sqrt(float_r2))
+
+        float_r_exp = float(np.sqrt(float_area / np.pi))
+        if float_r < float_r_exp * 0.7 or float_r > float_r_exp * 1.8:
+            return None
+        if np.pi * float_r ** 2 > float_area * 4.0:
             return None
 
-        # 피팅 타원 면적이 마스크의 4배 초과 → 부분 호만 보여 이상 피팅
-        float_ellipse_area = math.pi * float_a * float_b
-        if float_ellipse_area > float_area * 4.0:
+        # 원형도 품질 체크: hull 포인트들이 피팅된 원에 얼마나 잘 맞는가
+        # 타원형 입자의 경우 각 포인트의 원 중심까지 거리 편차가 크다
+        arr_dists = np.sqrt((arr_pts[:, 0] - float_cx) ** 2 + (arr_pts[:, 1] - float_cy) ** 2)
+        float_cv = float(np.std(arr_dists)) / max(float_r, 1.0)  # 변동계수
+        if float_cv > 0.10:  # 10% 이상 편차 → 원이 아님(타원 등) → 복원 불필요
             return None
 
-        # 축비가 너무 극단적이면 신뢰 불가
-        if float_b / float_a < 0.25:
-            return None
-
-        return tpl_center, tpl_axes, float_angle
+        return float_cx, float_cy, float_r
 
     @staticmethod
     def _hull_mask(arr_mask: np.ndarray) -> np.ndarray:
@@ -1489,26 +1499,25 @@ class Sam2AspectRatioService:
                 # 오목한 노치가 있는 입자: Kasa + 밝기 필터로 부분 복원
                 # (solidity < 0.97 = 3% 이상 오목 영역 존재)
                 if float_solidity < 0.97:
-                    result = self._fit_particle_ellipse(arr_mask)
+                    result = self._fit_particle_circle(arr_mask)
                     if result is not None:
-                        tpl_center, tpl_axes, float_angle = result
+                        float_cx, float_cy, float_r = result
                         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
                         int_otsu, _ = cv2.threshold(
                             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                        arr_ellipse = np.zeros_like(arr_mask)
-                        tpl_center_i = (int(round(tpl_center[0])), int(round(tpl_center[1])))
-                        tpl_axes_i = (max(1, int(round(tpl_axes[0] / 2))),
-                                      max(1, int(round(tpl_axes[1] / 2))))
-                        cv2.ellipse(arr_ellipse, tpl_center_i, tpl_axes_i,
-                                    float_angle, 0, 360, 1, -1)
-                        arr_notch = arr_ellipse.astype(bool) & ~arr_mask.astype(bool)
+                        arr_circle = np.zeros_like(arr_mask)
+                        cv2.circle(arr_circle,
+                                   (int(round(float_cx)), int(round(float_cy))),
+                                   int(round(float_r)), 1, -1)
+                        arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
                         arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
 
-                        # 복원 시각화: 피팅 타원(노란 원), 추가된 픽셀(파란색)
-                        cv2.ellipse(arr_restoration_viz, tpl_center_i, tpl_axes_i,
-                                    float_angle, 0, 360, (0, 200, 255), 1)
+                        # 복원 시각화: Kasa 원(노란 원), 추가된 픽셀(파란색)
+                        cv2.circle(arr_restoration_viz,
+                                   (int(round(float_cx)), int(round(float_cy))),
+                                   int(round(float_r)), (0, 200, 255), 1)
                         arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
 
                 # 모든 입자에 hull 적용
