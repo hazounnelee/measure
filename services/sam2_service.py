@@ -600,6 +600,46 @@ class Sam2AspectRatioService:
         return arr_out
 
     @staticmethod
+    def _erode_background_boundary(
+        arr_mask: np.ndarray,
+        arr_roiBgr: np.ndarray,
+        float_low_grad_trigger: float = 0.35,
+        int_erode_px: int = 4,
+    ) -> np.ndarray:
+        """경계 픽셀 중 저그라디언트 비율이 높으면(배경 포함 의심) erosion으로 제거한다.
+
+        float_low_grad_trigger: 경계 픽셀 중 저그라디언트 비율이 이 값 초과 시 erosion 적용.
+        """
+        arr_gray = cv2.cvtColor(arr_roiBgr, cv2.COLOR_BGR2GRAY)
+        arr_gx = cv2.Sobel(arr_gray, cv2.CV_32F, 1, 0, ksize=3)
+        arr_gy = cv2.Sobel(arr_gray, cv2.CV_32F, 0, 1, ksize=3)
+        arr_grad = np.sqrt(arr_gx ** 2 + arr_gy ** 2)
+
+        float_gmax = float(arr_grad.max())
+        if float_gmax < 1e-6:
+            return arr_mask
+
+        # 경계(두께 2px) 픽셀에서 정규화 그라디언트 샘플링
+        arr_boundary = np.zeros_like(arr_mask, dtype=np.uint8)
+        list_cnts, _ = cv2.findContours(arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        if not list_cnts:
+            return arr_mask
+        cv2.drawContours(arr_boundary, list_cnts, -1, 1, thickness=2)
+
+        arr_bvals = (arr_grad / float_gmax)[arr_boundary > 0]
+        if len(arr_bvals) == 0:
+            return arr_mask
+
+        # 저그라디언트 = 정규화값 < 0.08 (평탄한 배경 영역)
+        float_low_ratio = float((arr_bvals < 0.08).mean())
+        if float_low_ratio > float_low_grad_trigger:
+            arr_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (int_erode_px * 2 + 1, int_erode_px * 2 + 1))
+            arr_mask = cv2.erode(arr_mask, arr_kernel, iterations=1)
+
+        return arr_mask
+
+    @staticmethod
     def _split_peanut_mask(
         arr_mask: np.ndarray,
         float_ar_thresh: float = 0.60,
@@ -1489,9 +1529,8 @@ class Sam2AspectRatioService:
                     float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
                     float_solidity = float_cnt_area / max(float_hull_area, 1.0)
 
-                # 오목한 노치가 있는 입자만 Kasa + 밝기 필터로 부분 복원 후 hull
+                # 오목한 노치가 있는 입자: Kasa + 밝기 필터로 부분 복원
                 # (solidity < 0.97 = 3% 이상 오목 영역 존재)
-                bool_restored = False
                 if float_solidity < 0.97:
                     result = self._fit_particle_circle(arr_mask)
                     if result is not None:
@@ -1507,15 +1546,14 @@ class Sam2AspectRatioService:
                         arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
-                            bool_restored = True
 
-                    # 복원이 일어난 경우에만 hull로 나머지 마감
-                    if bool_restored:
-                        arr_mask = self._hull_mask(arr_mask)
+                # 모든 입자에 hull 적용 후 배경 포함 감지 시 erosion
+                arr_mask = self._hull_mask(arr_mask)
+                arr_mask = self._erode_background_boundary(arr_mask, arr_inputRoiBgr)
 
                 obj_geom = self.measure_mask(
                     arr_mask, int_index=int_index, float_confidence=float_confidence,
-                    bool_convexHullSphericity=bool_restored)
+                    bool_convexHullSphericity=True)
                 if obj_geom is not None and obj_geom.str_category == "particle":
                     obj_measurement = obj_geom
 
