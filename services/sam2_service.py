@@ -1199,6 +1199,7 @@ class Sam2AspectRatioService:
         dict_roi: tp.Dict[str, int],
         dict_debug: tp.Dict[str, tp.Any],
         arr_raw_masks: tp.Optional[np.ndarray] = None,
+        arr_restoration_viz: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
 
@@ -1285,6 +1286,9 @@ class Sam2AspectRatioService:
         arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay.png"), arr_overlayFull)
+
+        if arr_restoration_viz is not None:
+            cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
@@ -1467,6 +1471,8 @@ class Sam2AspectRatioService:
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
 
+        arr_restoration_viz = arr_inputRoiBgr.copy()
+
         for int_index, arr_mask in enumerate(arr_masks):
             float_confidence = None
             if arr_scores is not None and int_index < len(arr_scores):
@@ -1508,6 +1514,12 @@ class Sam2AspectRatioService:
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
 
+                        # 복원 시각화: Kasa 원(노란 원), 추가된 픽셀(파란색)
+                        cv2.circle(arr_restoration_viz,
+                                   (int(round(float_cx)), int(round(float_cy))),
+                                   int(round(float_r)), (0, 200, 255), 1)
+                        arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
+
                 # 모든 입자에 hull 적용
                 arr_mask = self._hull_mask(arr_mask)
 
@@ -1542,6 +1554,7 @@ class Sam2AspectRatioService:
             dict_roi,
             dict_debug,
             arr_raw_masks=arr_masks,
+            arr_restoration_viz=arr_restoration_viz,
         )
 
         return Sam2AspectRatioResult(
