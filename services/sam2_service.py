@@ -1547,9 +1547,17 @@ class Sam2AspectRatioService:
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
 
-                # 모든 입자에 hull 적용 후 배경 포함 감지 시 erosion
-                arr_mask = self._hull_mask(arr_mask)
-                arr_mask = self._erode_background_boundary(arr_mask, arr_inputRoiBgr)
+                # hull 적용 — 단, 추가된 픽셀 중 밝은 것만 수락 (어두우면 배경)
+                arr_hull = self._hull_mask(arr_mask)
+                arr_added = arr_hull.astype(bool) & ~arr_mask.astype(bool)
+                if arr_added.any():
+                    arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+                    int_otsu, _ = cv2.threshold(
+                        arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    arr_added_ok = arr_added & (arr_gray_roi >= int_otsu * 3 // 4)
+                    arr_mask = (arr_mask.astype(bool) | arr_added_ok).astype(arr_mask.dtype)
+                else:
+                    arr_mask = arr_hull
 
                 obj_geom = self.measure_mask(
                     arr_mask, int_index=int_index, float_confidence=float_confidence,
