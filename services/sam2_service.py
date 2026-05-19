@@ -577,6 +577,14 @@ class Sam2AspectRatioService:
             return None
         if np.pi * float_r ** 2 > float_area * 4.0:
             return None
+
+        # 원형도 품질 체크: hull 포인트들이 피팅된 원에 얼마나 잘 맞는가
+        # 타원형 입자의 경우 각 포인트의 원 중심까지 거리 편차가 크다
+        arr_dists = np.sqrt((arr_pts[:, 0] - float_cx) ** 2 + (arr_pts[:, 1] - float_cy) ** 2)
+        float_cv = float(np.std(arr_dists)) / max(float_r, 1.0)  # 변동계수
+        if float_cv > 0.10:  # 10% 이상 편차 → 원이 아님(타원 등) → 복원 불필요
+            return None
+
         return float_cx, float_cy, float_r
 
     @staticmethod
