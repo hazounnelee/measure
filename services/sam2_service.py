@@ -895,13 +895,21 @@ class Sam2AspectRatioService:
         float_eqDiameterUm = self.convert_pixels_to_micrometers(float_eqDiameterPx)
 
         float_sphericity = None
+        float_sphericity_prime = None
         if str_category == "particle":
-            # S = (D_equiv/D_max)² × (D_min/D_max)³  ≡  (b/a)⁵ for an ellipse
-            # - 원: S = 1.0  |  a/b=1.1: S≈0.62  |  a/b=1.2: S≈0.40  |  a/b=1.5: S≈0.13
+            # S: bbox 기반 (b/a)⁵ — 빠르고 안정적, 기울어진 타원엔 취약
             float_D_equiv = float_eqDiameterPx
             float_D_max = float(max(int_horizontal, int_vertical, 1))
             float_D_min = float(max(min(int_horizontal, int_vertical), 1))
             float_sphericity = min(1.0, (float_D_equiv / float_D_max) ** 2 * (float_D_min / float_D_max) ** 3)
+
+            # S': fitEllipse 기반 (b/a)⁵ — 기울어진 타원도 올바르게 측정
+            if len(arr_contour) >= 5:
+                _, (float_ew, float_eh), _ = cv2.fitEllipse(arr_contour)
+                float_fit_a = max(float_ew, float_eh) / 2.0
+                float_fit_b = min(float_ew, float_eh) / 2.0
+                if float_fit_a > 0:
+                    float_sphericity_prime = min(1.0, (float_fit_b / float_fit_a) ** 5)
 
         return ObjectMeasurement(
             int_index=int_index,
@@ -922,6 +930,7 @@ class Sam2AspectRatioService:
             float_longestVerticalUm=self.convert_pixels_to_micrometers(float(int_vertical)),
             float_eqDiameterUm=float_eqDiameterUm,
             float_sphericity=float_sphericity,
+            float_sphericity_prime=float_sphericity_prime,
         )
 
     def create_overlay(
@@ -967,7 +976,10 @@ class Sam2AspectRatioService:
             if obj_measurement.str_category == "particle":
                 list_lines = []
                 if obj_measurement.float_sphericity is not None:
-                    list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
+                    str_s = f"S={obj_measurement.float_sphericity:.2f}"
+                    if obj_measurement.float_sphericity_prime is not None:
+                        str_s += f" S'={obj_measurement.float_sphericity_prime:.2f}"
+                    list_lines.append(str_s)
                 if list_lines:
                     draw_label_no_overlap(
                         arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)
@@ -1024,6 +1036,11 @@ class Sam2AspectRatioService:
             obj_item.float_sphericity
             for obj_item in list_particles
             if obj_item.float_sphericity is not None
+        ]
+        list_particleSphs_prime = [
+            obj_item.float_sphericity_prime
+            for obj_item in list_particles
+            if obj_item.float_sphericity_prime is not None
         ]
         if self.obj_config.bool_useEqDiameter:
             list_particleSizes = [obj_item.float_eqDiameterUm for obj_item in list_particles]
@@ -1086,12 +1103,18 @@ class Sam2AspectRatioService:
             "particle_sphericity_std": None,
             "particle_sphericity_min": None,
             "particle_sphericity_max": None,
+            "particle_sphericity_prime_mean": None,
+            "particle_sphericity_prime_median": None,
+            "particle_sphericity_prime_std": None,
+            "particle_sphericity_prime_min": None,
+            "particle_sphericity_prime_max": None,
             "particle_mean_size_um": None,
             "particle_size_median_um": None,
             "particle_size_std_um": None,
             "particle_size_min_um": None,
             "particle_size_max_um": None,
             "particle_sphericity_raw": [],
+            "particle_sphericity_prime_raw": [],
             "particle_size_um_raw": [],
         }
 
@@ -1104,6 +1127,17 @@ class Sam2AspectRatioService:
                 "particle_sphericity_min": float(np.min(arr_sphs)),
                 "particle_sphericity_max": float(np.max(arr_sphs)),
                 "particle_sphericity_raw": [float(v) for v in list_particleSphs],
+            })
+
+        if list_particleSphs_prime:
+            arr_sphs_prime = np.array(list_particleSphs_prime, dtype=np.float32)
+            dict_summary.update({
+                "particle_sphericity_prime_mean": float(np.mean(arr_sphs_prime)),
+                "particle_sphericity_prime_median": float(np.median(arr_sphs_prime)),
+                "particle_sphericity_prime_std": float(np.std(arr_sphs_prime)),
+                "particle_sphericity_prime_min": float(np.min(arr_sphs_prime)),
+                "particle_sphericity_prime_max": float(np.max(arr_sphs_prime)),
+                "particle_sphericity_prime_raw": [float(v) for v in list_particleSphs_prime],
             })
 
         if list_particleSizes:
