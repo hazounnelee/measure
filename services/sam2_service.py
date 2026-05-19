@@ -967,16 +967,13 @@ class Sam2AspectRatioService:
             int_cx2 = int(round(obj_measurement.float_centroidX * 2))
             int_cy2 = int(round(obj_measurement.float_centroidY * 2))
 
-            if obj_measurement.str_category == "particle" and self.obj_config.bool_useEqDiameter:
-                int_eqRadius2 = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi) * 2))
-                cv2.circle(arr_overlay, (int_cx2, int_cy2), int_eqRadius2, tpl_color, 1)
-
             if obj_measurement.str_category == "particle":
-                list_lines = [f"d={obj_measurement.float_eqDiameterUm:.2f}um"]
+                list_lines = []
                 if obj_measurement.float_sphericity is not None:
                     list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
-                draw_label_no_overlap(
-                    arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)
+                if list_lines:
+                    draw_label_no_overlap(
+                        arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)
 
         return arr_overlay
 
