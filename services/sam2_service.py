@@ -571,10 +571,11 @@ class Sam2AspectRatioService:
         if float_solidity < 0.50 or float_solidity > 0.95:
             return arr_mask
 
-        # Kasa 최소제곱 원 피팅: x²+y² = 2cx·x + 2cy·y + (r²-cx²-cy²)
-        arr_pts = arr_cnt.reshape(-1, 2).astype(np.float64)
-        arr_z = arr_pts[:, 0] ** 2 + arr_pts[:, 1] ** 2
-        arr_A = np.column_stack([2.0 * arr_pts[:, 0], 2.0 * arr_pts[:, 1], np.ones(len(arr_pts))])
+        # Kasa 최소제곱 원 피팅: convex hull 포인트만 사용
+        # 노치 안쪽 호(arc) 포인트를 제외해야 피팅이 안쪽으로 당겨지지 않는다.
+        arr_hull_pts = arr_hull.reshape(-1, 2).astype(np.float64)
+        arr_z = arr_hull_pts[:, 0] ** 2 + arr_hull_pts[:, 1] ** 2
+        arr_A = np.column_stack([2.0 * arr_hull_pts[:, 0], 2.0 * arr_hull_pts[:, 1], np.ones(len(arr_hull_pts))])
         arr_res, _, _, _ = np.linalg.lstsq(arr_A, arr_z, rcond=None)
         float_cx = float(arr_res[0])
         float_cy = float(arr_res[1])
