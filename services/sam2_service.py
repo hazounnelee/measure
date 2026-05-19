@@ -1450,35 +1450,44 @@ class Sam2AspectRatioService:
                 continue
 
             if obj_measurement.str_category == "particle":
-                # ① Kasa 원 + 밝기 필터로 부분 복원 (test_pixbright와 동일한 방식)
-                #    → 노치 영역에 밝은 픽셀(다른 입자 표면)을 추가해 hull이 둥글게 닫히게 함
-                result = self._fit_particle_circle(arr_mask)
-                if result is not None:
-                    float_cx, float_cy, float_r = result
-                    arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-                    int_otsu, _ = cv2.threshold(
-                        arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                    arr_circle = np.zeros_like(arr_mask)
-                    cv2.circle(arr_circle,
-                               (int(round(float_cx)), int(round(float_cy))),
-                               int(round(float_r)), 1, -1)
-                    arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
-                    arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
-                    if arr_bright.sum() > 50:
-                        arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
+                # 솔리디티 계산 — 이미 볼록(convex)한 입자는 Kasa 복원 불필요
+                list_cnts_s, _ = cv2.findContours(
+                    arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                float_solidity = 1.0
+                if list_cnts_s:
+                    arr_cnt_s = max(list_cnts_s, key=cv2.contourArea)
+                    float_cnt_area = float(cv2.contourArea(arr_cnt_s))
+                    float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
+                    float_solidity = float_cnt_area / max(float_hull_area, 1.0)
 
-                # ② 부분 복원된 마스크에 convex hull 적용
-                #    → 나머지 오목한 영역도 매끄럽게 채움
+                # 오목한 노치가 있는 입자만 Kasa + 밝기 필터로 부분 복원
+                # (solidity < 0.97 = 3% 이상 오목 영역 존재)
+                if float_solidity < 0.97:
+                    result = self._fit_particle_circle(arr_mask)
+                    if result is not None:
+                        float_cx, float_cy, float_r = result
+                        arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+                        int_otsu, _ = cv2.threshold(
+                            arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                        arr_circle = np.zeros_like(arr_mask)
+                        cv2.circle(arr_circle,
+                                   (int(round(float_cx)), int(round(float_cy))),
+                                   int(round(float_r)), 1, -1)
+                        arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
+                        arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
+                        if arr_bright.sum() > 50:
+                            arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
+
+                # 모든 입자에 hull 적용 (볼록 → 변화없음, 오목 → 나머지 채움)
                 arr_mask = self._hull_mask(arr_mask)
 
-                # 면적/직경은 hull 기준, 구형도는 원본 값 유지
+                # 면적/직경/구형도 모두 hull 마스크 기준
+                # hull 컨투어는 계단 오차 없으므로 convexHullSphericity=True (0.9528 보정 없음)
                 obj_geom = self.measure_mask(
-                    arr_mask, int_index=int_index, float_confidence=float_confidence)
+                    arr_mask, int_index=int_index, float_confidence=float_confidence,
+                    bool_convexHullSphericity=True)
                 if obj_geom is not None and obj_geom.str_category == "particle":
-                    obj_measurement = dataclasses_replace(
-                        obj_geom,
-                        float_sphericity=obj_measurement.float_sphericity,
-                    )
+                    obj_measurement = obj_geom
 
             list_objects.append(obj_measurement)
             list_validMasks.append(
