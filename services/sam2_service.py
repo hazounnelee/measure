@@ -944,6 +944,7 @@ class Sam2AspectRatioService:
         arr_imageBgr: np.ndarray,
         list_objects: tp.List[ObjectMeasurement],
         list_masks: tp.List[np.ndarray],
+        str_show: str = "both",  # "both" | "S" | "Sp"
     ) -> np.ndarray:
         """객체 마스크와 라벨을 원본 ROI 이미지 위에 시각화한다.
 
@@ -981,9 +982,9 @@ class Sam2AspectRatioService:
 
             if obj_measurement.str_category == "particle":
                 list_lines = []
-                if obj_measurement.float_sphericity is not None:
+                if str_show in ("both", "S") and obj_measurement.float_sphericity is not None:
                     list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
-                if obj_measurement.float_sphericity_prime is not None:
+                if str_show in ("both", "Sp") and obj_measurement.float_sphericity_prime is not None:
                     list_lines.append(f"S'={obj_measurement.float_sphericity_prime:.2f}")
                 if list_lines:
                     draw_label_no_overlap(
@@ -1289,6 +1290,13 @@ class Sam2AspectRatioService:
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay.png"), arr_overlayFull)
 
+        arr_overlay_S  = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="S")
+        arr_overlay_Sp = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="Sp")
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_S.png"),
+                    self._append_stats_bar(arr_overlay_S, dict_summary))
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_Sp.png"),
+                    self._append_stats_bar(arr_overlay_Sp, dict_summary))
+
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
 
@@ -1475,11 +1483,24 @@ class Sam2AspectRatioService:
 
         arr_restoration_viz = arr_inputRoiBgr.copy()
 
+        # 밝기 필터 기준: Otsu 임계값의 절반 미만 평균 밝기 → 배경으로 간주
+        arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        int_otsu_global, _ = cv2.threshold(
+            arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        float_brightness_thresh = float(int_otsu_global) * 0.5
+
         for int_index, arr_mask in enumerate(arr_masks):
             float_confidence = None
             if arr_scores is not None and int_index < len(arr_scores):
                 float_s = float(arr_scores[int_index])
                 float_confidence = None if math.isnan(float_s) else float_s
+
+            # 밝기 필터: 마스크 영역 평균 밝기가 Otsu×0.5 미만이면 배경으로 제거
+            arr_mask_bool = arr_mask.astype(bool)
+            if arr_mask_bool.any():
+                float_mean_brightness = float(arr_gray_roi[arr_mask_bool].mean())
+                if float_mean_brightness < float_brightness_thresh:
+                    continue
 
             # 원본 마스크 측정 — 구형도(S)는 이 값 사용
             obj_measurement = self.measure_mask(
@@ -1504,15 +1525,12 @@ class Sam2AspectRatioService:
                     result = self._fit_particle_circle(arr_mask)
                     if result is not None:
                         float_cx, float_cy, float_r = result
-                        arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-                        int_otsu, _ = cv2.threshold(
-                            arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                         arr_circle = np.zeros_like(arr_mask)
                         cv2.circle(arr_circle,
                                    (int(round(float_cx)), int(round(float_cy))),
                                    int(round(float_r)), 1, -1)
                         arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
-                        arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu) * 3 // 4)
+                        arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu_global) * 3 // 4)
                         if arr_bright.sum() > 50:
                             arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
 

@@ -191,86 +191,65 @@ def save_secondary_batch_histograms(
     # which are pooled at the group level, not stored at the batch level.
     list_sizes: tp.List[float] = []
     list_sphs: tp.List[float] = []
+    list_sphs_prime: tp.List[float] = []
     list_fine: tp.List[float] = []
-    list_size_stds: tp.List[float] = []      # 이미지(파일)별 입도 표준편차
-    list_size_per_image: tp.List[float] = [] # 이미지(파일)별 평균 입도
-    list_sph_per_image: tp.List[float] = []  # 이미지(파일)별 평균 구형도
+    list_size_stds: tp.List[float] = []
+    list_size_per_image: tp.List[float] = []
+    list_sph_per_image: tp.List[float] = []
+    list_sph_prime_per_image: tp.List[float] = []
+
+    def _safe_float(v: tp.Any) -> tp.Optional[float]:
+        try:
+            fv = float(v)
+            return None if math.isnan(fv) else fv
+        except (TypeError, ValueError):
+            return None
+
     for dict_g in (dict_batchSummary.get("img_ids") or []):
         for v in (dict_g.get("particle_size_um_raw") or []):
-            try:
-                fv = float(v)
-                if not math.isnan(fv):
-                    list_sizes.append(fv)
-            except (TypeError, ValueError):
-                pass
+            fv = _safe_float(v)
+            if fv is not None: list_sizes.append(fv)
         for v in (dict_g.get("particle_sphericity_raw") or []):
-            try:
-                fv = float(v)
-                if not math.isnan(fv):
-                    list_sphs.append(fv)
-            except (TypeError, ValueError):
-                pass
+            fv = _safe_float(v)
+            if fv is not None: list_sphs.append(fv)
+        for v in (dict_g.get("particle_sphericity_prime_raw") or []):
+            fv = _safe_float(v)
+            if fv is not None: list_sphs_prime.append(fv)
+
         for dict_f in (dict_g.get("files") or []):
-            # per-particle raw (fallback if img_id level is absent)
             if not dict_g.get("particle_size_um_raw"):
                 for v in (dict_f.get("particle_size_um_raw") or []):
-                    try:
-                        fv = float(v)
-                        if not math.isnan(fv):
-                            list_sizes.append(fv)
-                    except (TypeError, ValueError):
-                        pass
+                    fv = _safe_float(v)
+                    if fv is not None: list_sizes.append(fv)
 
-            # std: prefer pre-computed per-file value, fallback to raw
             v_std = dict_f.get("particle_size_std_um")
             if v_std is not None:
-                try:
-                    fv = float(v_std)
-                    if not math.isnan(fv):
-                        list_size_stds.append(fv)
-                except (TypeError, ValueError):
-                    pass
+                fv = _safe_float(v_std)
+                if fv is not None: list_size_stds.append(fv)
             else:
-                list_raw = [float(r) for r in (dict_f.get("particle_size_um_raw") or [])
-                            if not math.isnan(float(r))]
+                list_raw = [r for r in (_safe_float(x) for x in (dict_f.get("particle_size_um_raw") or [])) if r is not None]
                 if len(list_raw) >= 2:
                     list_size_stds.append(float(np.std(list_raw, ddof=1)))
 
-            # per-image mean
-            v = dict_f.get("particle_mean_size_um")
-            if v is not None:
-                try:
-                    fv = float(v)
-                    if not math.isnan(fv):
-                        list_size_per_image.append(fv)
-                except (TypeError, ValueError):
-                    pass
-            v = dict_f.get("particle_sphericity_mean")
-            if v is not None:
-                try:
-                    fv = float(v)
-                    if not math.isnan(fv):
-                        list_sph_per_image.append(fv)
-                except (TypeError, ValueError):
-                    pass
+            for key, lst in [
+                ("particle_mean_size_um",          list_size_per_image),
+                ("particle_sphericity_mean",        list_sph_per_image),
+                ("particle_sphericity_prime_mean",  list_sph_prime_per_image),
+            ]:
+                fv = _safe_float(dict_f.get(key))
+                if fv is not None: lst.append(fv)
 
-            v = dict_f.get("fine_particle_ratio_percent")
-            if v is not None:
-                try:
-                    fv = float(v)
-                    if not math.isnan(fv):
-                        list_fine.append(fv)
-                except (TypeError, ValueError):
-                    pass
+            fv = _safe_float(dict_f.get("fine_particle_ratio_percent"))
+            if fv is not None: list_fine.append(fv)
 
     float_size_xmin,     float_size_xmax     = _std_xlim(list_sizes)
-    float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs)
-    float_sph_xmax = min(float_sph_xmax, 0.99) if float_sph_xmax is not None else 0.99
+    float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs,       float_hard_max=1.0)
+    float_sph_p_xmin,    float_sph_p_xmax    = _std_xlim(list_sphs_prime, float_hard_max=1.0)
     float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
     float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
     float_size_pi_xmin,  float_size_pi_xmax  = _std_xlim(list_size_per_image)
-    float_sph_pi_xmin,   float_sph_pi_xmax   = _std_xlim(list_sph_per_image)
-    float_sph_pi_xmax = min(float_sph_pi_xmax, 1.0) if float_sph_pi_xmax is not None else 1.0
+    float_sph_pi_xmin,   float_sph_pi_xmax   = _std_xlim(list_sph_per_image,       float_hard_max=1.0)
+    float_sph_p_pi_xmin, float_sph_p_pi_xmax = _std_xlim(list_sph_prime_per_image, float_hard_max=1.0)
 
     _save_batch_hist(
         list_vals=list_sizes,
@@ -303,21 +282,39 @@ def save_secondary_batch_histograms(
     )
     _save_batch_hist(
         list_vals=list_sphs,
-        path_output=path_outputDir / "batch_hist_sphericity.png",
-        str_title=f"{str_prefix}Sphericity — Batch Distribution (per particle)",
-        str_xlabel="Sphericity",
+        path_output=path_outputDir / "batch_hist_S.png",
+        str_title=f"{str_prefix}S — Batch Distribution (per particle)",
+        str_xlabel="S (Circularity)",
         str_color="#44cc44",
         str_unit="",
         float_xlim_min=float_sph_xmin, float_xlim_max=float_sph_xmax,
     )
     _save_batch_hist(
         list_vals=list_sph_per_image,
-        path_output=path_outputDir / "batch_hist_sphericity_per_image.png",
-        str_title=f"{str_prefix}Sphericity — Batch Distribution (per-image mean)",
-        str_xlabel="Mean Sphericity",
+        path_output=path_outputDir / "batch_hist_S_per_image.png",
+        str_title=f"{str_prefix}S — Batch Distribution (per-image mean)",
+        str_xlabel="Mean S",
         str_color="#229922",
         str_unit="",
         float_xlim_min=float_sph_pi_xmin, float_xlim_max=float_sph_pi_xmax,
+    )
+    _save_batch_hist(
+        list_vals=list_sphs_prime,
+        path_output=path_outputDir / "batch_hist_Sp.png",
+        str_title=f"{str_prefix}S' — Batch Distribution (per particle)",
+        str_xlabel="S' (Ellipse)",
+        str_color="#cc44cc",
+        str_unit="",
+        float_xlim_min=float_sph_p_xmin, float_xlim_max=float_sph_p_xmax,
+    )
+    _save_batch_hist(
+        list_vals=list_sph_prime_per_image,
+        path_output=path_outputDir / "batch_hist_Sp_per_image.png",
+        str_title=f"{str_prefix}S' — Batch Distribution (per-image mean)",
+        str_xlabel="Mean S'",
+        str_color="#992299",
+        str_unit="",
+        float_xlim_min=float_sph_p_pi_xmin, float_xlim_max=float_sph_p_pi_xmax,
     )
     _save_batch_hist(
         list_vals=list_fine,
@@ -333,14 +330,30 @@ def save_secondary_batch_histograms(
 def _std_xlim(
     list_vals: tp.List[float],
     float_z: float = 1.96,
+    float_hard_min: tp.Optional[float] = None,
+    float_hard_max: tp.Optional[float] = None,
 ) -> tp.Tuple[tp.Optional[float], tp.Optional[float]]:
-    """Return (xmin, xmax) as mean ± z*std (default z=1.96 for 95%)."""
+    """Return (xmin, xmax) clipped to actual data range (no empty-space expansion).
+
+    Computes mean ± z*std then clips to [data_min, data_max] so the axis
+    never extends into a region with no data. Hard limits further constrain
+    the result when provided.
+    """
     if len(list_vals) < 4:
-        return None, None
+        return float_hard_min, float_hard_max
     arr = np.array(list_vals, dtype=np.float64)
     float_mean = float(np.mean(arr))
-    float_std = float(np.std(arr))
-    return float_mean - float_z * float_std, float_mean + float_z * float_std
+    float_std  = float(np.std(arr))
+    float_data_min = float(arr.min())
+    float_data_max = float(arr.max())
+    # clip computed range to actual data extent (no empty-space padding)
+    float_xmin = max(float_mean - float_z * float_std, float_data_min)
+    float_xmax = min(float_mean + float_z * float_std, float_data_max)
+    if float_hard_min is not None:
+        float_xmin = max(float_xmin, float_hard_min)
+    if float_hard_max is not None:
+        float_xmax = min(float_xmax, float_hard_max)
+    return float_xmin, float_xmax
 
 
 def save_primary_batch_histograms(
