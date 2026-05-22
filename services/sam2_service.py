@@ -1483,6 +1483,43 @@ class Sam2AspectRatioService:
         # ② 가려진 입자 보정  ③ 땅콩 분리
         arr_masks, arr_scores = self._postprocess_masks(arr_masks, arr_scores)
 
+        # 포함 관계 펀치: 작은 마스크가 큰 마스크에 97%+ 포함되면 큰 마스크에서 제거
+        # → 이후 밝기 필터는 펀치된 마스크(입자 테두리 영역) 기준으로 판단
+        if len(arr_masks) > 1:
+            arr_masks_areas = np.array([m.sum() for m in arr_masks], dtype=np.int64)
+            arr_idx_sorted = np.argsort(arr_masks_areas)[::-1]
+            arr_masks_punched = [m.copy() for m in arr_masks]
+            # bbox 선계산: (x1, y1, x2, y2)
+            list_punch_bboxes = []
+            for m in arr_masks:
+                mb = m.astype(bool)
+                if mb.any():
+                    rows = np.where(mb.any(axis=1))[0]
+                    cols = np.where(mb.any(axis=0))[0]
+                    list_punch_bboxes.append((int(cols[0]), int(rows[0]), int(cols[-1]), int(rows[-1])))
+                else:
+                    list_punch_bboxes.append((0, 0, 0, 0))
+            for int_i_pos in range(len(arr_idx_sorted) - 1):
+                int_i = arr_idx_sorted[int_i_pos]
+                ix1, iy1, ix2, iy2 = list_punch_bboxes[int_i]
+                for int_j_pos in range(int_i_pos + 1, len(arr_idx_sorted)):
+                    int_j = arr_idx_sorted[int_j_pos]
+                    int_area_j = int(arr_masks_areas[int_j])
+                    if int_area_j == 0:
+                        continue
+                    jx1, jy1, jx2, jy2 = list_punch_bboxes[int_j]
+                    if ix2 < jx1 or jx2 < ix1 or iy2 < jy1 or jy2 < iy1:
+                        continue
+                    int_overlap = int(
+                        (arr_masks[int_i].astype(bool) & arr_masks[int_j].astype(bool)).sum()
+                    )
+                    if int_overlap / int_area_j >= 0.97:
+                        arr_masks_punched[int_i] = (
+                            arr_masks_punched[int_i].astype(bool)
+                            & ~arr_masks[int_j].astype(bool)
+                        ).astype(arr_masks[int_i].dtype)
+            arr_masks = arr_masks_punched
+
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
 
@@ -1544,17 +1581,41 @@ class Sam2AspectRatioService:
                 continue
             float_sphericity_orig = obj_measurement_orig.float_sphericity
 
-            # 솔리디티 계산 → 오목한 마스크에 Kasa 복원 적용
+            # 솔리디티 계산 + SEM 직선 아티팩트에 의한 절단 감지
             list_cnts_s, _ = cv2.findContours(
                 arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             float_solidity = 1.0
+            bool_has_line_cut = False
             if list_cnts_s:
                 arr_cnt_s = max(list_cnts_s, key=cv2.contourArea)
                 float_cnt_area = float(cv2.contourArea(arr_cnt_s))
                 float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
                 float_solidity = float_cnt_area / max(float_hull_area, 1.0)
 
-            if float_solidity < 0.97:
+                int_mask_h, int_mask_w = arr_mask.shape[:2]
+                # 조건 1: 수평/수직 직선 구간 15px 이상 존재
+                arr_approx = cv2.approxPolyDP(arr_cnt_s, epsilon=2.0, closed=True)
+                for int_k in range(len(arr_approx)):
+                    pt1 = arr_approx[int_k][0]
+                    pt2 = arr_approx[(int_k + 1) % len(arr_approx)][0]
+                    float_dx = float(pt2[0] - pt1[0])
+                    float_dy = float(pt2[1] - pt1[1])
+                    float_seg_len = math.hypot(float_dx, float_dy)
+                    if float_seg_len < 15.0:
+                        continue
+                    float_angle = math.degrees(math.atan2(abs(float_dy), abs(float_dx)))
+                    if float_angle < 5.0 or float_angle > 85.0:
+                        bool_has_line_cut = True
+                        break
+                # 조건 2: ROI 경계 접촉
+                if not bool_has_line_cut:
+                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_cnt_s)
+                    if (int_bx == 0 or int_by == 0
+                            or int_bx + int_bw >= int_mask_w
+                            or int_by + int_bh >= int_mask_h):
+                        bool_has_line_cut = True
+
+            if float_solidity < 0.97 or bool_has_line_cut:
                 result = self._fit_particle_circle(arr_mask)
                 if result is not None:
                     float_cx, float_cy, float_r = result
@@ -1590,6 +1651,75 @@ class Sam2AspectRatioService:
             list_objects.append(obj_measurement)
             list_validMasks.append(
                 self.refine_mask_for_area(arr_mask).astype(np.uint8))
+
+        # hull 마스크 97%+ 겹침 → 합집합 병합
+        int_n_hull = len(list_validMasks)
+        if int_n_hull > 1:
+            arr_hull_areas = np.array([m.sum() for m in list_validMasks], dtype=np.int64)
+            # bbox 선계산: (x1, y1, x2, y2)
+            list_hull_bboxes = []
+            for m in list_validMasks:
+                mb = m.astype(bool)
+                if mb.any():
+                    rows = np.where(mb.any(axis=1))[0]
+                    cols = np.where(mb.any(axis=0))[0]
+                    list_hull_bboxes.append((int(cols[0]), int(rows[0]), int(cols[-1]), int(rows[-1])))
+                else:
+                    list_hull_bboxes.append((0, 0, 0, 0))
+            # union-find
+            list_parent = list(range(int_n_hull))
+
+            def _find(x: int) -> int:
+                while list_parent[x] != x:
+                    list_parent[x] = list_parent[list_parent[x]]
+                    x = list_parent[x]
+                return x
+
+            for int_i in range(int_n_hull - 1):
+                ix1, iy1, ix2, iy2 = list_hull_bboxes[int_i]
+                for int_j in range(int_i + 1, int_n_hull):
+                    int_area_min = int(min(arr_hull_areas[int_i], arr_hull_areas[int_j]))
+                    if int_area_min == 0:
+                        continue
+                    jx1, jy1, jx2, jy2 = list_hull_bboxes[int_j]
+                    if ix2 < jx1 or jx2 < ix1 or iy2 < jy1 or jy2 < iy1:
+                        continue
+                    int_overlap = int(
+                        (list_validMasks[int_i].astype(bool)
+                         & list_validMasks[int_j].astype(bool)).sum()
+                    )
+                    if int_overlap / int_area_min >= 0.97:
+                        list_parent[_find(int_i)] = _find(int_j)
+
+            dict_groups: tp.Dict[int, tp.List[int]] = {}
+            for int_i in range(int_n_hull):
+                dict_groups.setdefault(_find(int_i), []).append(int_i)
+
+            list_objects_new: tp.List[ObjectMeasurement] = []
+            list_validMasks_new: tp.List[np.ndarray] = []
+            for list_idx in dict_groups.values():
+                if len(list_idx) == 1:
+                    list_objects_new.append(list_objects[list_idx[0]])
+                    list_validMasks_new.append(list_validMasks[list_idx[0]])
+                else:
+                    arr_union = list_validMasks[list_idx[0]].copy()
+                    for int_k in list_idx[1:]:
+                        arr_union = (
+                            arr_union.astype(bool) | list_validMasks[int_k].astype(bool)
+                        ).astype(arr_union.dtype)
+                    int_lead = max(list_idx, key=lambda k: arr_hull_areas[k])
+                    obj_merged = self.measure_mask(
+                        arr_union,
+                        int_index=list_objects[int_lead].int_index,
+                        float_confidence=list_objects[int_lead].float_confidence,
+                        bool_convexHullSphericity=True,
+                    )
+                    if obj_merged is not None:
+                        list_objects_new.append(obj_merged)
+                        list_validMasks_new.append(
+                            self.refine_mask_for_area(arr_union).astype(np.uint8))
+            list_objects = list_objects_new
+            list_validMasks = list_validMasks_new
 
         arr_overlay = self.create_overlay(
             arr_inputRoiBgr, list_objects, list_validMasks)

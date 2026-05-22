@@ -8,8 +8,8 @@ from pathlib import Path
 class Sam2AspectRatioConfig:
     path_input: Path = Path(".")
     path_outputDir: Path = Path("out")
-    path_modelConfig: Path = Path("model/sam2.1_hiera_t.yaml")
-    path_modelWeights: Path = Path("model/sam2.1_hiera_base_plus.pt")
+    path_modelConfig: Path = Path("../model/sam2.1_hiera_t.yaml")
+    path_modelWeights: Path = Path("../model/sam2.1_hiera_base_plus.pt")
     int_preprocessWidth: int = 1024
     bool_useOpenCV: bool = False
     int_roiXMin: int = 0

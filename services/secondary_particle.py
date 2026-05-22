@@ -94,11 +94,13 @@ def _build_img_id_summary(
     int_fragmentCount = int(sum((d.get("num_fragments") or 0) for d in list_fileSummaries))
 
     list_pooled_sphs: tp.List[float] = []
+    list_pooled_sphs_prime: tp.List[float] = []
     list_pooled_sizes: tp.List[float] = []
     list_fine_ratios: tp.List[float] = []
     list_times: tp.List[float] = []
     for d in list_fileSummaries:
         list_pooled_sphs.extend(d.get("particle_sphericity_raw") or [])
+        list_pooled_sphs_prime.extend(d.get("particle_sphericity_prime_raw") or [])
         list_pooled_sizes.extend(d.get("particle_size_um_raw") or [])
         if d.get("fine_particle_ratio_percent") is not None:
             try:
@@ -129,10 +131,14 @@ def _build_img_id_summary(
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_fileSummaries),
         "particle_sphericity": pooled_stats(list_pooled_sphs),
+        "particle_sphericity_prime_mean": calculate_mean_from_optional_values(
+            d.get("particle_sphericity_prime_mean") for d in list_fileSummaries),
+        "particle_sphericity_prime": pooled_stats(list_pooled_sphs_prime),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_fileSummaries),
         "particle_size_um": pooled_stats(list_pooled_sizes),
         "particle_sphericity_raw": list_pooled_sphs,
+        "particle_sphericity_prime_raw": list_pooled_sphs_prime,
         "particle_size_um_raw": list_pooled_sizes,
         "processing_time_sec": pooled_stats(list_times),
         "files": list_fileSummaries,
@@ -149,11 +155,13 @@ def _build_batch_summary(
     int_fragmentCount = int(sum((d.get("num_fragments") or 0) for d in list_groupSummaries))
 
     list_all_sphs: tp.List[float] = []
+    list_all_sphs_prime: tp.List[float] = []
     list_all_sizes: tp.List[float] = []
     list_all_fine_ratios: tp.List[float] = []
     list_all_times: tp.List[float] = []
     for g in list_groupSummaries:
         list_all_sphs.extend(g.get("particle_sphericity_raw") or [])
+        list_all_sphs_prime.extend(g.get("particle_sphericity_prime_raw") or [])
         list_all_sizes.extend(g.get("particle_size_um_raw") or [])
         for f in g.get("files") or []:
             if f.get("fine_particle_ratio_percent") is not None:
@@ -183,6 +191,9 @@ def _build_batch_summary(
         "particle_sphericity_mean": calculate_mean_from_optional_values(
             d.get("particle_sphericity_mean") for d in list_groupSummaries),
         "particle_sphericity": pooled_stats(list_all_sphs),
+        "particle_sphericity_prime_mean": calculate_mean_from_optional_values(
+            d.get("particle_sphericity_prime_mean") for d in list_groupSummaries),
+        "particle_sphericity_prime": pooled_stats(list_all_sphs_prime),
         "particle_mean_size_um": calculate_mean_from_optional_values(
             d.get("particle_mean_size_um") for d in list_groupSummaries),
         "particle_size_um": pooled_stats(list_all_sizes),
