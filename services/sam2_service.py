@@ -1238,14 +1238,34 @@ class Sam2AspectRatioService:
             2,
         )
 
-        cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "input.png"), arr_inputBgr)
-        cv2.imwrite(str(self.obj_config.path_outputDir /
-                    "input_roi.png"), arr_inputRoiBgr)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "input_roi.png"), arr_inputRoiBgr)
 
-        # ── 파이프라인 단계별 이미지 (순서대로) ───────────────────────────────
+        if list_objects:
+            arr_eq = self.draw_eq_circles_clean(arr_inputRoiBgr, list_objects, list_masks)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "classified.png"), arr_eq)
 
-        # 03: 타일 그리드
+        arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
+
+        with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
+            json_dump_safe(dict_summary, obj_f)
+
+        if not self.obj_config.bool_debug:
+            return
+
+        # ── 디버그 모드 전용 ───────────────────────────────────────────────────
+
+        cv2.imwrite(str(self.obj_config.path_outputDir / "input.png"), arr_inputBgr)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay.png"), arr_overlayFull)
+
+        arr_overlay_S  = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="S")
+        arr_overlay_Sp = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="Sp")
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_S.png"),
+                    self._append_stats_bar(arr_overlay_S, dict_summary))
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_Sp.png"),
+                    self._append_stats_bar(arr_overlay_Sp, dict_summary))
+
+        # 파이프라인 단계별 이미지
         list_tiles = dict_debug.get("tiles", [])
         if list_tiles:
             arr_tiles_viz = arr_inputRoiBgr.copy()
@@ -1255,7 +1275,6 @@ class Sam2AspectRatioService:
                               (200, 200, 0), 1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
 
-        # 04: 포인트 프롬프트 (positive=cyan, negative=red)
         list_pts = dict_debug.get("candidate_points", [])
         if list_pts:
             arr_pts_viz = arr_inputRoiBgr.copy()
@@ -1267,7 +1286,6 @@ class Sam2AspectRatioService:
                 cv2.circle(arr_pts_viz, (int_px, int_py), 3, tpl_color, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompts.png"), arr_pts_viz)
 
-        # 05: 탐지된 원시 마스크 전체
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
             arr_raw_viz = arr_inputRoiBgr.copy()
             for int_i, arr_m in enumerate(arr_raw_masks):
@@ -1281,22 +1299,6 @@ class Sam2AspectRatioService:
                     + np.array(tpl_c, dtype=np.float32) * 0.5
                 ).astype(np.uint8)
             cv2.imwrite(str(self.obj_config.path_outputDir / "masks_raw.png"), arr_raw_viz)
-
-        # 06: 크기 기반 전구체/미분 분류 + 등가원
-        if list_objects:
-            arr_eq = self.draw_eq_circles_clean(arr_inputRoiBgr, list_objects, list_masks)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "classified.png"), arr_eq)
-
-        arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay.png"), arr_overlayFull)
-
-        arr_overlay_S  = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="S")
-        arr_overlay_Sp = self.create_overlay(arr_inputRoiBgr, list_objects, list_masks, str_show="Sp")
-        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_S.png"),
-                    self._append_stats_bar(arr_overlay_S, dict_summary))
-        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_Sp.png"),
-                    self._append_stats_bar(arr_overlay_Sp, dict_summary))
 
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
@@ -1342,9 +1344,6 @@ class Sam2AspectRatioService:
             )
         except Exception as exc:
             print(f"[WARN] sph_dist.png 저장 실패: {exc}", flush=True)
-
-        with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
-            json_dump_safe(dict_summary, obj_f)
 
         with (self.obj_config.path_outputDir / "objects.json").open("w", encoding="utf-8") as obj_f:
             json_dump_safe([asdict(obj_item) for obj_item in list_objects], obj_f)
@@ -1452,17 +1451,17 @@ class Sam2AspectRatioService:
             arr_raw_masks=arr_raw_masks,
         )
 
-        # ── 파이프라인 단계별 이미지 저장 (save_outputs에서 이미 디렉토리 생성됨) ──
-        cv2.imwrite(str(self.obj_config.path_outputDir / "clahe.png"), arr_clahe)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "binary.png"), arr_binary)
-        arr_dist_viz = cv2.normalize(arr_dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        cv2.imwrite(
-            str(self.obj_config.path_outputDir / "dist.png"),
-            cv2.applyColorMap(arr_dist_viz, cv2.COLORMAP_JET),
-        )
-        arr_ws_viz = arr_inputRoiBgr.copy()
-        arr_ws_viz[arr_markers == -1] = [0, 0, 255]
-        cv2.imwrite(str(self.obj_config.path_outputDir / "watershed.png"), arr_ws_viz)
+        if self.obj_config.bool_debug:
+            cv2.imwrite(str(self.obj_config.path_outputDir / "clahe.png"), arr_clahe)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "binary.png"), arr_binary)
+            arr_dist_viz = cv2.normalize(arr_dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            cv2.imwrite(
+                str(self.obj_config.path_outputDir / "dist.png"),
+                cv2.applyColorMap(arr_dist_viz, cv2.COLORMAP_JET),
+            )
+            arr_ws_viz = arr_inputRoiBgr.copy()
+            arr_ws_viz[arr_markers == -1] = [0, 0, 255]
+            cv2.imwrite(str(self.obj_config.path_outputDir / "watershed.png"), arr_ws_viz)
 
         return Sam2AspectRatioResult(list_objects=list_objects, dict_summary=dict_summary)
 

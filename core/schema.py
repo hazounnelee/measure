@@ -41,6 +41,7 @@ class Sam2AspectRatioConfig:
     bool_retinaMasks: bool = True
     bool_saveIndividualMasks: bool = True
     bool_useEqDiameter: bool = True
+    bool_debug: bool = False
 
 
 @dataclass

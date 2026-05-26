@@ -239,6 +239,7 @@ def run_secondary_particle_analysis(
     int_preprocessWidth: int = 1024,
     int_numGpus: int = 1,
     bool_useOpenCV: bool = False,
+    bool_debug: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
     path_input = Path(str_input)
@@ -288,6 +289,7 @@ def run_secondary_particle_analysis(
             bool_useEqDiameter=bool_useEqDiameter,
             int_preprocessWidth=int_preprocessWidth,
             bool_useOpenCV=bool_useOpenCV,
+            bool_debug=bool_debug,
         )
 
     if not bool_isBatch:
@@ -500,4 +502,6 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             help="멀티 GPU 병렬 처리 수. GPU가 여러 장이면 이미지를 분산 처리. 기본값: 1.")
     obj_parser.add_argument("--opencv", action=argparse.BooleanOptionalAction, default=False,
                             help="SAM2 대신 OpenCV CLAHE+Otsu 기반 세그멘테이션을 사용한다. 빠르지만 단순함.")
+    obj_parser.add_argument("--debug", action="store_true", default=False,
+                            help="디버그 이미지/파일 저장 (tiles, prompts, masks_raw, overlay, CSV, JSON 등).")
     return obj_parser
