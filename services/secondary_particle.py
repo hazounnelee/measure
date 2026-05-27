@@ -346,6 +346,20 @@ def run_secondary_particle_analysis(
     for str_groupId, list_imagePaths in tqdm(list_inputGroups, desc="groups", unit="group"):
 
         def _run_image(path_image: Path) -> tp.Optional[tp.Dict[str, tp.Any]]:
+            path_imageOutDir = _build_image_output_dir(path_outputRoot, str_groupId, path_image, bool_isBatch)
+            path_cachedSummary = path_imageOutDir / "summary.json"
+            if path_cachedSummary.exists():
+                try:
+                    with path_cachedSummary.open(encoding="utf-8") as obj_f:
+                        dict_fs = json.load(obj_f)
+                    dict_fs.setdefault("img_id", str_groupId)
+                    dict_fs.setdefault("image_name", path_image.name)
+                    dict_fs.setdefault("image_path", str(path_image))
+                    print(f"  [skip] {path_image.name} (이미 처리됨)", flush=True)
+                    return dict_fs
+                except Exception:
+                    pass  # 읽기 실패 시 재처리
+
             if bool_useOpenCV:
                 # OpenCV 모드: 모델 공유 불필요 → 큐 경합 없이 독립 실행
                 try:
