@@ -19,11 +19,14 @@ def main() -> None:
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-    # 1차 파싱: --config / --particle_type / --magnification 만 먼저 읽는다.
+    # 1차 파싱: --config / --particle_type / --big/--small/--active / --magnification 만 먼저 읽는다.
     obj_preParser = argparse.ArgumentParser(add_help=False)
     obj_preParser.add_argument("--config", default=_DEFAULT_PATHS_CONFIG)
     obj_preParser.add_argument("--particle_type", default=None)
     obj_preParser.add_argument("--magnification", default=None)
+    obj_preParser.add_argument("--big", action="store_true", default=False)
+    obj_preParser.add_argument("--small", action="store_true", default=False)
+    obj_preParser.add_argument("--active", action="store_true", default=False)
     obj_preArgs, _ = obj_preParser.parse_known_args()
 
     # 메인 파서 구성
@@ -53,14 +56,27 @@ def main() -> None:
     except ValueError as exc:
         print(f"[ERROR] --magnification: {exc}", file=sys.stderr, flush=True)
         sys.exit(1)
-    if obj_preArgs.particle_type is not None:
+
+    # --big/--small/--active 플래그에서 particle_type 도출 (--particle_type 명시 시 우선)
+    str_effective_type = obj_preArgs.particle_type
+    if str_effective_type is None:
+        if obj_preArgs.big:
+            str_effective_type = "acicular"
+        elif obj_preArgs.small:
+            str_effective_type = "plate"
+        elif obj_preArgs.active:
+            str_effective_type = "active"
+
+    if str_effective_type is not None:
         str_preset_key = mag_to_preset_key(float_mag) if float_mag else "20k"
-        dict_preset = get_analysis_preset(obj_preArgs.particle_type, str_preset_key)
+        dict_preset = get_analysis_preset(str_effective_type, str_preset_key)
         if dict_preset:
             obj_parser.set_defaults(**dict_preset)
-            print(f"[preset] {obj_preArgs.particle_type}/{str_preset_key} 프리셋 적용 ({len(dict_preset)}개 파라미터)", flush=True)
+            print(f"[preset] {str_effective_type}/{str_preset_key} 프리셋 적용 ({len(dict_preset)}개 파라미터)", flush=True)
         else:
-            print(f"[preset] 알 수 없는 조합: {obj_preArgs.particle_type}/{str_preset_key} (기본값 사용)", flush=True)
+            print(f"[preset] 알 수 없는 조합: {str_effective_type}/{str_preset_key} (기본값 사용)", flush=True)
+        if obj_preArgs.particle_type is None:
+            obj_parser.set_defaults(particle_type=str_effective_type)
 
     # 3) 배율에서 scale_pixels 자동 계산 (preset보다 우선, CLI보다 후순위)
     if float_mag is not None:

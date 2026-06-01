@@ -938,10 +938,13 @@ class PrimaryParticleService(Sam2AspectRatioService):
                 for obj_m in list_objects:
                     obj_writer.writerow(asdict(obj_m))
 
-        # target-type CSV (acicular.csv or plate.csv, never both)
+        # target-type CSV (acicular.csv / plate.csv / active.csv)
         str_type = self.obj_primary_config.str_particleType
-        if str_type in ("acicular", "plate"):
-            list_rows = [asdict(o) for o in list_objects if o.str_category == str_type]
+        if str_type in ("acicular", "plate", "active"):
+            if str_type == "active":
+                list_rows = [asdict(o) for o in list_objects]
+            else:
+                list_rows = [asdict(o) for o in list_objects if o.str_category == str_type]
             path_csv_type = self.obj_config.path_outputDir / f"{str_type}.csv"
             with path_csv_type.open("w", newline="", encoding="utf-8-sig") as obj_f:
                 if list_rows:
@@ -1723,13 +1726,29 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         help="추론 device. 예: cpu, cuda:0")
 
     # ── 핵심 분석 모드 선택 (preset 적용됨) ──────────────────────
+    # 편의 플래그: --big / --small / --active (상호 배타적)
+    group_ptype = obj_parser.add_mutually_exclusive_group()
+    group_ptype.add_argument(
+        "--big", action="store_true", default=False,
+        help="대입경 전구체 1차입자 (침상). --particle_type acicular 와 동일.",
+    )
+    group_ptype.add_argument(
+        "--small", action="store_true", default=False,
+        help="소입경 전구체 1차입자 (판상). --particle_type plate 와 동일.",
+    )
+    group_ptype.add_argument(
+        "--active", action="store_true", default=False,
+        help="활물질 1차입자.",
+    )
+
     obj_parser.add_argument(
         "--particle_type", default=None,
-        choices=["acicular", "plate"],
+        choices=["acicular", "plate", "active"],
         help=(
             "1차 입자 형태 (필수 권장). "
-            "'acicular': 침상 입자 = 대입경 전구체 특성. "
-            "'plate': 판상 입자 = 소입경 전구체 특성. "
+            "'acicular'(=--big): 침상 입자 = 대입경 전구체. "
+            "'plate'(=--small): 판상 입자 = 소입경 전구체. "
+            "'active'(=--active): 활물질 1차입자. "
             "지정하면 --magnification 과 함께 최적 파라미터가 자동 설정됨."
         ),
     )
