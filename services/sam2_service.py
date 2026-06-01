@@ -13,7 +13,7 @@ import yaml
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
-from utils.image import draw_label_no_overlap, create_processing_tiles, enhance_image_texture, sample_interest_points, sample_prompt_points, find_dist_transform_peaks, detect_hybrid_candidates, detect_watershed_prompts
+from utils.image import draw_label_no_overlap, create_processing_tiles, find_dist_transform_peaks, detect_hct_prompts
 from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
@@ -322,7 +322,7 @@ class Sam2AspectRatioService:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
                 list_isolatedMasks: tp.List[np.ndarray] = []
                 try:
-                    list_isolatedMasks, list_posPoints, list_negPoints = detect_watershed_prompts(
+                    list_isolatedMasks, list_posPoints, list_negPoints = detect_hct_prompts(
                         arr_tileGray=arr_tileGray,
                         int_minDist=self.obj_config.int_pointMinDistance,
                         int_numNeg=self.obj_config.int_numNegativePoints,

@@ -143,115 +143,6 @@ def create_processing_tiles(
     return list_dedup
 
 
-def enhance_image_texture(arr_tileGray: np.ndarray) -> np.ndarray:
-    """CLAHE + gradient + Laplacian texture enhancement for point detection."""
-    obj_clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
-    arr_eq = obj_clahe.apply(arr_tileGray)
-    arr_blur = cv2.GaussianBlur(arr_eq, (3, 3), 0)
-    arr_grad = cv2.Sobel(arr_blur, cv2.CV_32F, 1, 0) ** 2
-    arr_grad += cv2.Sobel(arr_blur, cv2.CV_32F, 0, 1) ** 2
-    arr_grad = cv2.normalize(np.sqrt(arr_grad), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    arr_lap = cv2.normalize(np.abs(cv2.Laplacian(arr_blur, cv2.CV_32F)), None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    arr_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    arr_blackhat = cv2.morphologyEx(arr_eq, cv2.MORPH_BLACKHAT, arr_kernel)
-    arr_enhanced = cv2.addWeighted(arr_eq, 0.4, arr_grad, 0.3, 0)
-    arr_enhanced = cv2.addWeighted(arr_enhanced, 0.8, arr_lap, 0.1, 0)
-    arr_enhanced = cv2.addWeighted(arr_enhanced, 0.9, arr_blackhat, 0.1, 0)
-    return arr_enhanced
-
-
-def sample_interest_points(
-    arr_tileGray: np.ndarray,
-    int_maxPoints: int,
-    int_minDist: int,
-    float_qualityLevel: float,
-) -> np.ndarray:
-    """Shi-Tomasi corner detection on a tile. Returns (N, 2) float32 array of (x, y)."""
-    arr_enhanced = enhance_image_texture(arr_tileGray)
-    arr_corners = cv2.goodFeaturesToTrack(
-        arr_enhanced,
-        maxCorners=int_maxPoints,
-        qualityLevel=float_qualityLevel,
-        minDistance=float(int_minDist),
-    )
-    if arr_corners is not None:
-        return arr_corners.reshape(-1, 2)
-    _, arr_thresh = cv2.threshold(arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    list_cnts, _ = cv2.findContours(arr_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    list_pts: tp.List[tp.List[float]] = []
-    for cnt in list_cnts:
-        obj_m = cv2.moments(cnt)
-        if obj_m["m00"] > 0:
-            list_pts.append([obj_m["m10"] / obj_m["m00"], obj_m["m01"] / obj_m["m00"]])
-    if list_pts:
-        return np.array(list_pts, dtype=np.float32)
-    int_h, int_w = arr_tileGray.shape[:2]
-    return np.array([[int_w / 2.0, int_h / 2.0]], dtype=np.float32)
-
-
-def sample_prompt_points(
-    arr_tileGray: np.ndarray,
-    int_maxParticles: int,
-    int_minDist: int,
-    int_numNegative: int = 3,
-) -> tp.Tuple[tp.List[tp.Tuple[int, int]], tp.List[tp.Tuple[int, int]]]:
-    """Return (positive, negative) point lists for SAM2 prompting.
-
-    Positive: distance-transform peak inside each foreground blob — one interior
-    point per particle, guaranteed not to be on the boundary.
-    Negative: points uniformly sampled from the clearly-background region (after
-    erosion), so SAM2 suppresses background mask expansion.
-    """
-    int_h, int_w = arr_tileGray.shape[:2]
-
-    # ── foreground mask via Otsu ────────────────────────────────────────────
-    arr_blur = cv2.GaussianBlur(arr_tileGray, (5, 5), 0)
-    _, arr_fg = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    arr_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_CLOSE, arr_kernel, iterations=2)
-    arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_OPEN,  arr_kernel, iterations=1)
-
-    # ── positive: distance-transform peak per connected blob ────────────────
-    int_numLabels, arr_labels = cv2.connectedComponents(arr_fg)
-    arr_dist = cv2.distanceTransform(arr_fg, cv2.DIST_L2, 5)
-
-    list_positive: tp.List[tp.Tuple[int, int]] = []
-    arr_used = np.empty((0, 2), dtype=np.float32)
-
-    for int_label in range(1, int_numLabels):
-        if len(list_positive) >= int_maxParticles:
-            break
-        arr_blob_mask = (arr_labels == int_label).astype(np.uint8)
-        if float(arr_blob_mask.sum()) < 20:
-            continue
-        # peak of distance transform = deepest interior point
-        arr_blob_dist = arr_dist * arr_blob_mask.astype(np.float32)
-        int_peak_idx = int(np.argmax(arr_blob_dist))
-        int_py, int_px = divmod(int_peak_idx, int_w)
-        # enforce min distance from already-selected positive points
-        if arr_used.shape[0] > 0:
-            if float(np.linalg.norm(arr_used - [int_px, int_py], axis=1).min()) < int_minDist:
-                continue
-        list_positive.append((int_px, int_py))
-        arr_used = np.vstack([arr_used, [[int_px, int_py]]])
-
-    # fallback: tile center
-    if not list_positive:
-        list_positive = [(int_w // 2, int_h // 2)]
-
-    # ── negative: uniformly spread points in eroded background ─────────────
-    arr_bg = cv2.bitwise_not(arr_fg)
-    arr_bg_eroded = cv2.erode(arr_bg, arr_kernel, iterations=4)
-    arr_bg_coords = np.column_stack(np.where(arr_bg_eroded > 0))  # (row, col)
-
-    list_negative: tp.List[tp.Tuple[int, int]] = []
-    if arr_bg_coords.shape[0] > 0 and int_numNegative > 0:
-        arr_idx = np.linspace(0, arr_bg_coords.shape[0] - 1, int_numNegative, dtype=int)
-        for idx in arr_idx:
-            int_py, int_px = int(arr_bg_coords[idx, 0]), int(arr_bg_coords[idx, 1])
-            list_negative.append((int_px, int_py))
-
-    return list_positive, list_negative
 
 
 def _find_fg_mask(arr_tileGray: np.ndarray) -> np.ndarray:
@@ -295,78 +186,7 @@ def find_dist_transform_peaks(
     return [(int(arr_coords[i, 1]), int(arr_coords[i, 0])) for i in arr_order]
 
 
-def detect_hybrid_candidates(
-    arr_tileGray: np.ndarray,
-    int_minDist: int = 14,
-    int_numNeg: int = 3,
-    int_minArea: int = 200,
-    float_solidity_thresh: float = 0.85,
-    float_circularity_thresh: float = 0.65,
-) -> tp.Tuple[
-    tp.List[np.ndarray],
-    tp.List[tp.Tuple[int, int]],
-    tp.List[tp.Tuple[int, int]],
-]:
-    """Classify foreground blobs as isolated or overlapping cluster.
-
-    For **isolated** (single round) particles: returns the OpenCV blob mask
-    directly — no SAM2 needed.
-    For **overlapping clusters**: finds all distance-transform peaks (one per
-    constituent particle) to use as SAM2 positive prompts.
-
-    Returns:
-        isolated_masks  — list of (H, W) uint8 masks in tile coordinates.
-        pos_points      — (x, y) SAM2 positive prompts from cluster peaks.
-        neg_points      — (x, y) SAM2 negative prompts from eroded background.
-    """
-    int_h, int_w = arr_tileGray.shape[:2]
-    arr_fg = _find_fg_mask(arr_tileGray)
-
-    int_n, arr_labels = cv2.connectedComponents(arr_fg)
-
-    list_isolated: tp.List[np.ndarray] = []
-    list_pos: tp.List[tp.Tuple[int, int]] = []
-
-    for int_lbl in range(1, int_n):
-        arr_blob = (arr_labels == int_lbl).astype(np.uint8)
-        float_area = float(arr_blob.sum())
-        if float_area < int_minArea:
-            continue
-
-        list_cnts, _ = cv2.findContours(arr_blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not list_cnts:
-            continue
-        arr_cnt = max(list_cnts, key=cv2.contourArea)
-
-        float_perim = cv2.arcLength(arr_cnt, True)
-        float_circularity = (4.0 * np.pi * float_area / max(float_perim ** 2, 1.0))
-
-        arr_hull = cv2.convexHull(arr_cnt)
-        float_hull_area = cv2.contourArea(arr_hull)
-        float_solidity = float_area / max(float_hull_area, 1.0)
-
-        if float_circularity >= float_circularity_thresh and float_solidity >= float_solidity_thresh:
-            # Single isolated particle — use OpenCV mask directly
-            list_isolated.append(arr_blob)
-        else:
-            # Overlapping cluster — find one SAM2 prompt per particle
-            list_peaks = find_dist_transform_peaks(arr_blob, int_minDist)
-            list_pos.extend(list_peaks)
-
-    # Negative points from eroded background
-    arr_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    arr_bg_eroded = cv2.erode(cv2.bitwise_not(arr_fg), arr_k, iterations=4)
-    arr_bg_coords = np.column_stack(np.where(arr_bg_eroded > 0))
-    list_neg: tp.List[tp.Tuple[int, int]] = []
-    if arr_bg_coords.shape[0] > 0 and int_numNeg > 0:
-        arr_idx = np.linspace(0, arr_bg_coords.shape[0] - 1, int_numNeg, dtype=int)
-        for idx in arr_idx:
-            list_neg.append((int(arr_bg_coords[idx, 1]), int(arr_bg_coords[idx, 0])))
-
-    return list_isolated, list_pos, list_neg
-
-
-def detect_watershed_prompts(
+def detect_hct_prompts(
     arr_tileGray: np.ndarray,
     int_minDist: int = 14,
     int_numNeg: int = 3,
@@ -377,15 +197,15 @@ def detect_watershed_prompts(
     tp.List[tp.Tuple[int, int]],
     tp.List[tp.Tuple[int, int]],
 ]:
-    """Hough Circle Transform → SAM2 positive prompts.
+    """Hough Circle Transform → SAM2 positive/negative prompts.
 
-    Canny 기반 컨투어 fill은 겹친 입자 이미지에서 엣지가 모두 연결되어 개별 원을
-    분리할 수 없다. HCT는 closed ring이 없어도 gradient 투표로 원의 중심을 찾으며,
+    HCT는 closed ring이 없어도 gradient 투표로 원의 중심을 찾으며,
     겹침/부분 가려짐에도 강건하다.
 
-    1. Hough Circle Transform → 각 원의 중심 (x, y) → SAM2 포지티브 프롬프트
-    2. HCT 실패 시 fallback: contour fill + watershed (구 방식)
-    3. 배경에서 네거티브 프롬프트 샘플링
+    1. HCT → 각 원의 중심 (x, y) → SAM2 포지티브 프롬프트
+    2. HCT 실패 시 fallback: Canny contour fill + 거리변환 peak
+    3. HCT 미커버 전경 블롭 → 거리변환 peak 추가 (fragment 등)
+    4. 배경에서 네거티브 프롬프트 샘플링
 
     Returns:
         isolated_masks — 항상 빈 리스트 (모두 SAM2 경로로 처리)
