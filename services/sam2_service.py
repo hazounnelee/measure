@@ -982,6 +982,8 @@ class Sam2AspectRatioService:
 
             if obj_measurement.str_category == "particle":
                 list_lines = []
+                if obj_measurement.float_eqDiameterUm is not None:
+                    list_lines.append(f"d={obj_measurement.float_eqDiameterUm:.1f}µm")
                 if str_show in ("both", "S") and obj_measurement.float_sphericity is not None:
                     list_lines.append(f"S={obj_measurement.float_sphericity:.2f}")
                 if str_show in ("both", "Sp") and obj_measurement.float_sphericity_prime is not None:
@@ -1014,11 +1016,6 @@ class Sam2AspectRatioService:
                 continue
             tpl_color = (0, 255, 0) if obj_measurement.str_category == "particle" else (0, 140, 255)
             cv2.drawContours(arr_out, [(arr_cnt * 2).astype(np.int32)], -1, tpl_color, 1)
-            if obj_measurement.str_category == "particle":
-                int_cx2 = int(round(obj_measurement.float_centroidX * 2))
-                int_cy2 = int(round(obj_measurement.float_centroidY * 2))
-                int_r2 = int(round(math.sqrt(obj_measurement.int_maskArea / math.pi) * 2))
-                cv2.circle(arr_out, (int_cx2, int_cy2), int_r2, (255, 255, 255), 1)
         return arr_out
 
     def build_summary(self, list_objects: tp.List[ObjectMeasurement]) -> tp.Dict[str, tp.Any]:
