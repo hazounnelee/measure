@@ -196,6 +196,7 @@ def detect_hct_prompts(
     tp.List[np.ndarray],
     tp.List[tp.Tuple[int, int]],
     tp.List[tp.Tuple[int, int]],
+    tp.List[tp.Tuple[int, int, int]],
 ]:
     """Hough Circle Transform → SAM2 positive/negative prompts.
 
@@ -240,6 +241,7 @@ def detect_hct_prompts(
     )
 
     list_pos: tp.List[tp.Tuple[int, int]] = []
+    list_hct_circles: tp.List[tp.Tuple[int, int, int]] = []
     arr_circles_mask = np.zeros((int_h, int_w), dtype=np.uint8)  # HCT 원이 커버하는 영역
     if arr_circles is not None:
         margin = int_minDist // 2
@@ -255,6 +257,7 @@ def detect_hct_prompts(
                 if arr_patch.size == 0 or float(arr_patch.mean()) < float(int_otsu_val) * 0.85:
                     continue  # dark gap between particles — skip
                 list_pos.append((int_x, int_y))
+                list_hct_circles.append((int_x, int_y, int(round(float_r))))
                 cv2.circle(arr_circles_mask, (int_x, int_y), int(round(float_r)), 255, -1)
 
     # ── 2. Fallback: contour RETR_CCOMP hole fill + dist transform peaks ──
@@ -302,7 +305,7 @@ def detect_hct_prompts(
         for idx in arr_idx:
             list_neg.append((int(arr_bg_coords[idx, 1]), int(arr_bg_coords[idx, 0])))
 
-    return [], list_pos, list_neg
+    return [], list_pos, list_neg, list_hct_circles
 
 
 def detect_sphere_roi(

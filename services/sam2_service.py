@@ -309,6 +309,7 @@ class Sam2AspectRatioService:
         list_keptBboxes: tp.List[tp.Tuple[int, int, int, int]] = list()
         list_debugTiles = list()
         list_debugPoints = list()
+        list_debugHctCircles: tp.List[tp.Dict[str, tp.Any]] = list()
         int_candidateCount = 0
         int_acceptedCount = 0
         int_bboxDedupRejected = 0
@@ -322,12 +323,17 @@ class Sam2AspectRatioService:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
                 list_isolatedMasks: tp.List[np.ndarray] = []
                 try:
-                    list_isolatedMasks, list_posPoints, list_negPoints = detect_hct_prompts(
+                    list_isolatedMasks, list_posPoints, list_negPoints, list_hctCircles = detect_hct_prompts(
                         arr_tileGray=arr_tileGray,
                         int_minDist=self.obj_config.int_pointMinDistance,
                         int_numNeg=self.obj_config.int_numNegativePoints,
                         int_minArea=int(self.obj_config.float_particleAreaThreshold),
                     )
+                    for (int_cx, int_cy, int_cr) in list_hctCircles:
+                        list_debugHctCircles.append({
+                            "center_roi": [int_tx1 + int_cx, int_ty1 + int_cy],
+                            "radius": int_cr,
+                        })
                 except Exception as exc:
                     print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
 
@@ -513,6 +519,7 @@ class Sam2AspectRatioService:
             "num_bbox_dedup_rejected": int_bboxDedupRejected,
             "tiles": list_debugTiles,
             "candidate_points": list_debugPoints,
+            "hct_circles": list_debugHctCircles,
         }
         return arr_masks, arr_scores, dict_debug
 
@@ -1303,6 +1310,53 @@ class Sam2AspectRatioService:
         if arr_brightness_filter_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "brightness_filter.png"),
                         arr_brightness_filter_viz)
+
+        # ── HCT + 반전 이진화 디버그 이미지 ──────────────────────────────────
+        list_hct_circles = dict_debug.get("hct_circles", [])
+        list_dbg_pts = dict_debug.get("candidate_points", [])
+        list_pos_pts = [p for p in list_dbg_pts if p.get("label", 1) == 1]
+
+        # 1. HCT 원 이미지 + positive point prompts
+        if list_hct_circles or list_pos_pts:
+            arr_hct_viz = arr_inputRoiBgr.copy()
+            for dict_c in list_hct_circles:
+                int_cx, int_cy = dict_c["center_roi"]
+                cv2.circle(arr_hct_viz, (int_cx, int_cy), dict_c["radius"], (0, 255, 0), 1)
+            for dict_pt in list_pos_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_hct_viz, (int_px, int_py), 3, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "hct_circles.png"), arr_hct_viz)
+
+        # 2. HCT 원 제거, positive point prompts 모두 표시
+        if list_pos_pts:
+            arr_ppp_viz = arr_inputRoiBgr.copy()
+            for dict_pt in list_pos_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_ppp_viz, (int_px, int_py), 3, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "hct_prompts.png"), arr_ppp_viz)
+
+        # 3. 반전 이진화 (2장)
+        arr_gray_dbg = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        arr_blur_dbg = cv2.GaussianBlur(arr_gray_dbg, (5, 5), 0)
+        int_otsu_dbg, arr_binary_dbg = cv2.threshold(
+            arr_blur_dbg, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_binary_inv = cv2.bitwise_not(arr_binary_dbg)
+
+        # 3a. 반전 이진화 + 모드(Otsu 임계값) 표시
+        arr_binv_mode = cv2.cvtColor(arr_binary_inv, cv2.COLOR_GRAY2BGR)
+        cv2.putText(arr_binv_mode, f"Otsu={int_otsu_dbg}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "binary_inv_mode.png"), arr_binv_mode)
+
+        # 3b. 반전 이진화 + positive point prompts
+        arr_binv_pts = cv2.cvtColor(arr_binary_inv, cv2.COLOR_GRAY2BGR)
+        for dict_pt in list_pos_pts:
+            int_px = int(dict_pt["point_xy_roi"][0])
+            int_py = int(dict_pt["point_xy_roi"][1])
+            cv2.circle(arr_binv_pts, (int_px, int_py), 3, (0, 255, 255), -1)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "binary_inv_prompts.png"), arr_binv_pts)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:
