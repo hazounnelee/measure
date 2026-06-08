@@ -119,5 +119,5 @@ class PrimaryParticleMeasurement:
 
 @dataclass
 class PrimaryParticleResult:
-    list_objects: tp.List[PrimaryParticleMeasurement]
+    list_objects: tp.Union[tp.List[PrimaryParticleMeasurement], tp.List[ObjectMeasurement]]
     dict_summary: tp.Dict[str, tp.Any]

@@ -19,6 +19,7 @@ from matplotlib.figure import Figure
 import numpy as np
 
 from core.schema import (
+    ObjectMeasurement,
     PrimaryParticleConfig,
     PrimaryParticleMeasurement,
     PrimaryParticleResult,
@@ -988,11 +989,300 @@ class PrimaryParticleService(Sam2AspectRatioService):
             cv2.imwrite(str(path_maskDir / str_fname), arr_mask.astype(np.uint8) * 255)
 
     # ----------------------------------------------------------
+    # active (활물질) 파이프라인 — 2차입자 로직 베이스, 미분/깨짐 분류 없음
+    # ----------------------------------------------------------
+
+    def process_active(self) -> PrimaryParticleResult:
+        """활물질 1차입자 분석 파이프라인. 2차입자 process() 로직 복사 기반."""
+        arr_inputBgr = self.load_image_bgr()
+        arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
+        arr_masks, arr_scores, dict_debug = self.predict_tiled_point_prompts(
+            arr_inputRoiBgr)
+
+        # 가려진 입자 보정 + 땅콩 분리
+        arr_masks, arr_scores = self._postprocess_masks(arr_masks, arr_scores)
+
+        # 포함 관계 펀치: 작은 마스크가 큰 마스크에 97%+ 포함되면 큰 마스크에서 제거
+        if len(arr_masks) > 1:
+            arr_masks_areas = np.array([m.sum() for m in arr_masks], dtype=np.int64)
+            arr_idx_sorted = np.argsort(arr_masks_areas)[::-1]
+            arr_masks_punched = [m.copy() for m in arr_masks]
+            list_punch_bboxes = []
+            for m in arr_masks:
+                mb = m.astype(bool)
+                if mb.any():
+                    rows = np.where(mb.any(axis=1))[0]
+                    cols = np.where(mb.any(axis=0))[0]
+                    list_punch_bboxes.append((int(cols[0]), int(rows[0]), int(cols[-1]), int(rows[-1])))
+                else:
+                    list_punch_bboxes.append((0, 0, 0, 0))
+            for int_i_pos in range(len(arr_idx_sorted) - 1):
+                int_i = arr_idx_sorted[int_i_pos]
+                ix1, iy1, ix2, iy2 = list_punch_bboxes[int_i]
+                for int_j_pos in range(int_i_pos + 1, len(arr_idx_sorted)):
+                    int_j = arr_idx_sorted[int_j_pos]
+                    int_area_j = int(arr_masks_areas[int_j])
+                    if int_area_j == 0:
+                        continue
+                    jx1, jy1, jx2, jy2 = list_punch_bboxes[int_j]
+                    if ix2 < jx1 or jx2 < ix1 or iy2 < jy1 or jy2 < iy1:
+                        continue
+                    int_overlap = int(
+                        (arr_masks[int_i].astype(bool) & arr_masks[int_j].astype(bool)).sum()
+                    )
+                    if int_overlap / int_area_j >= 0.97:
+                        arr_masks_punched[int_i] = (
+                            arr_masks_punched[int_i].astype(bool)
+                            & ~arr_masks[int_j].astype(bool)
+                        ).astype(arr_masks[int_i].dtype)
+            arr_masks = arr_masks_punched
+
+        list_objects: tp.List[ObjectMeasurement] = []
+        list_validMasks: tp.List[np.ndarray] = []
+
+        arr_restoration_viz = arr_inputRoiBgr.copy()
+
+        # 밝기 필터 기준: Otsu 임계값의 절반 미만 평균 밝기 → 배경으로 간주
+        arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        int_otsu_global, _ = cv2.threshold(
+            arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        float_brightness_thresh = float(int_otsu_global) * 0.5
+
+        # 밝기 필터 디버그 오버레이
+        int_h_viz, int_w_viz = arr_inputRoiBgr.shape[:2]
+        arr_bf_viz = cv2.resize(arr_inputRoiBgr,
+                                (int_w_viz * 2, int_h_viz * 2),
+                                interpolation=cv2.INTER_LINEAR)
+        list_bf_placed: tp.List[tp.Tuple[int, int, int, int]] = []
+        for arr_m in arr_masks:
+            arr_mb = arr_m.astype(bool)
+            if not arr_mb.any():
+                continue
+            float_mb = float(arr_gray_roi[arr_mb].mean())
+            float_ratio = float_mb / float(int_otsu_global) if int_otsu_global > 0 else 0.0
+            bool_pass = float_mb >= float_brightness_thresh
+            tpl_tint = (40, 200, 40) if bool_pass else (40, 40, 220)
+            arr_m2 = cv2.resize(arr_m, (int_w_viz * 2, int_h_viz * 2),
+                                interpolation=cv2.INTER_NEAREST)
+            arr_bf_viz[arr_m2 > 0] = (
+                arr_bf_viz[arr_m2 > 0].astype(np.float32) * 0.55
+                + np.array(tpl_tint, dtype=np.float32) * 0.45
+            ).astype(np.uint8)
+            cnts_bf, _ = cv2.findContours(arr_m2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if cnts_bf:
+                cv2.drawContours(arr_bf_viz, cnts_bf, -1, tpl_tint, 1)
+                M = cv2.moments(max(cnts_bf, key=cv2.contourArea))
+                if M["m00"] > 0:
+                    int_cx = int(M["m10"] / M["m00"])
+                    int_cy = int(M["m01"] / M["m00"])
+                    draw_label_no_overlap(
+                        arr_bf_viz, [f"{float_ratio:.2f}x"],
+                        int_cx, int_cy, tpl_tint, list_bf_placed)
+
+        for int_index, arr_mask in enumerate(arr_masks):
+            float_confidence = None
+            if arr_scores is not None and int_index < len(arr_scores):
+                float_s = float(arr_scores[int_index])
+                float_confidence = None if math.isnan(float_s) else float_s
+
+            # 밝기 필터
+            arr_mask_bool = arr_mask.astype(bool)
+            if arr_mask_bool.any():
+                float_mean_brightness = float(arr_gray_roi[arr_mask_bool].mean())
+                if float_mean_brightness < float_brightness_thresh:
+                    continue
+
+            # 원본 마스크 측정 — S(구형도) 기준값
+            obj_measurement_orig = self.measure_mask(
+                arr_mask, int_index=int_index, float_confidence=float_confidence)
+            if obj_measurement_orig is None:
+                continue
+            float_sphericity_orig = obj_measurement_orig.float_sphericity
+
+            # 솔리디티 + 직선 절단 감지 → 원 복원
+            list_cnts_s, _ = cv2.findContours(
+                arr_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            float_solidity = 1.0
+            bool_has_line_cut = False
+            if list_cnts_s:
+                arr_cnt_s = max(list_cnts_s, key=cv2.contourArea)
+                float_cnt_area = float(cv2.contourArea(arr_cnt_s))
+                float_hull_area = float(cv2.contourArea(cv2.convexHull(arr_cnt_s)))
+                float_solidity = float_cnt_area / max(float_hull_area, 1.0)
+
+                int_mask_h, int_mask_w = arr_mask.shape[:2]
+                arr_approx = cv2.approxPolyDP(arr_cnt_s, epsilon=2.0, closed=True)
+                for int_k in range(len(arr_approx)):
+                    pt1 = arr_approx[int_k][0]
+                    pt2 = arr_approx[(int_k + 1) % len(arr_approx)][0]
+                    float_dx = float(pt2[0] - pt1[0])
+                    float_dy = float(pt2[1] - pt1[1])
+                    float_seg_len = math.hypot(float_dx, float_dy)
+                    if float_seg_len < 15.0:
+                        continue
+                    float_angle = math.degrees(math.atan2(abs(float_dy), abs(float_dx)))
+                    if float_angle < 5.0 or float_angle > 85.0:
+                        bool_has_line_cut = True
+                        break
+                if not bool_has_line_cut:
+                    int_bx, int_by, int_bw, int_bh = cv2.boundingRect(arr_cnt_s)
+                    if (int_bx == 0 or int_by == 0
+                            or int_bx + int_bw >= int_mask_w
+                            or int_by + int_bh >= int_mask_h):
+                        bool_has_line_cut = True
+
+            if float_solidity < 0.97 or bool_has_line_cut:
+                result = self._fit_particle_circle(arr_mask)
+                if result is not None:
+                    float_cx, float_cy, float_r = result
+                    arr_circle = np.zeros_like(arr_mask)
+                    cv2.circle(arr_circle,
+                               (int(round(float_cx)), int(round(float_cy))),
+                               int(round(float_r)), 1, -1)
+                    arr_notch = arr_circle.astype(bool) & ~arr_mask.astype(bool)
+                    arr_bright = arr_notch & (arr_gray_roi >= int(int_otsu_global) * 3 // 4)
+                    if arr_bright.sum() > 50:
+                        arr_mask = (arr_mask.astype(bool) | arr_bright).astype(arr_mask.dtype)
+
+                    cv2.circle(arr_restoration_viz,
+                               (int(round(float_cx)), int(round(float_cy))),
+                               int(round(float_r)), (0, 200, 255), 1)
+                    arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
+
+            # hull 적용
+            arr_mask = self._hull_mask(arr_mask)
+
+            obj_measurement = self.measure_mask(
+                arr_mask, int_index=int_index, float_confidence=float_confidence,
+                bool_convexHullSphericity=True)
+            if obj_measurement is None:
+                continue
+
+            # S는 원본 컨투어 기준 유지
+            obj_measurement = dataclasses_replace(
+                obj_measurement,
+                float_sphericity=float_sphericity_orig,
+            )
+
+            # 미분/깨짐 분류 없이 모든 유효 객체를 particle로 통일
+            if obj_measurement.str_category == "fragment":
+                obj_measurement = dataclasses_replace(
+                    obj_measurement,
+                    str_category="particle",
+                )
+
+            list_objects.append(obj_measurement)
+            list_validMasks.append(
+                self.refine_mask_for_area(arr_mask).astype(np.uint8))
+
+        # hull 마스크 97%+ 겹침 → 합집합 병합
+        int_n_hull = len(list_validMasks)
+        if int_n_hull > 1:
+            arr_hull_areas = np.array([m.sum() for m in list_validMasks], dtype=np.int64)
+            list_hull_bboxes = []
+            for m in list_validMasks:
+                mb = m.astype(bool)
+                if mb.any():
+                    rows = np.where(mb.any(axis=1))[0]
+                    cols = np.where(mb.any(axis=0))[0]
+                    list_hull_bboxes.append((int(cols[0]), int(rows[0]), int(cols[-1]), int(rows[-1])))
+                else:
+                    list_hull_bboxes.append((0, 0, 0, 0))
+            list_parent = list(range(int_n_hull))
+
+            def _find(x: int) -> int:
+                while list_parent[x] != x:
+                    list_parent[x] = list_parent[list_parent[x]]
+                    x = list_parent[x]
+                return x
+
+            for int_i in range(int_n_hull - 1):
+                ix1, iy1, ix2, iy2 = list_hull_bboxes[int_i]
+                for int_j in range(int_i + 1, int_n_hull):
+                    int_area_min = int(min(arr_hull_areas[int_i], arr_hull_areas[int_j]))
+                    if int_area_min == 0:
+                        continue
+                    jx1, jy1, jx2, jy2 = list_hull_bboxes[int_j]
+                    if ix2 < jx1 or jx2 < ix1 or iy2 < jy1 or jy2 < iy1:
+                        continue
+                    int_overlap = int(
+                        (list_validMasks[int_i].astype(bool)
+                         & list_validMasks[int_j].astype(bool)).sum()
+                    )
+                    if int_overlap / int_area_min >= 0.97:
+                        list_parent[_find(int_i)] = _find(int_j)
+
+            dict_groups: tp.Dict[int, tp.List[int]] = {}
+            for int_i in range(int_n_hull):
+                dict_groups.setdefault(_find(int_i), []).append(int_i)
+
+            list_objects_new: tp.List[ObjectMeasurement] = []
+            list_validMasks_new: tp.List[np.ndarray] = []
+            for list_idx in dict_groups.values():
+                if len(list_idx) == 1:
+                    list_objects_new.append(list_objects[list_idx[0]])
+                    list_validMasks_new.append(list_validMasks[list_idx[0]])
+                else:
+                    arr_union = list_validMasks[list_idx[0]].copy()
+                    for int_k in list_idx[1:]:
+                        arr_union = (
+                            arr_union.astype(bool) | list_validMasks[int_k].astype(bool)
+                        ).astype(arr_union.dtype)
+                    int_lead = max(list_idx, key=lambda k: arr_hull_areas[k])
+                    obj_merged = self.measure_mask(
+                        arr_union,
+                        int_index=list_objects[int_lead].int_index,
+                        float_confidence=list_objects[int_lead].float_confidence,
+                        bool_convexHullSphericity=True,
+                    )
+                    if obj_merged is not None:
+                        if obj_merged.str_category == "fragment":
+                            obj_merged = dataclasses_replace(
+                                obj_merged, str_category="particle")
+                        list_objects_new.append(obj_merged)
+                        list_validMasks_new.append(
+                            self.refine_mask_for_area(arr_union).astype(np.uint8))
+            list_objects = list_objects_new
+            list_validMasks = list_validMasks_new
+
+        arr_overlay = self.create_overlay(
+            arr_inputRoiBgr, list_objects, list_validMasks)
+        dict_summary = self.build_summary(list_objects)
+        dict_summary["roi"] = dict_roi
+        dict_summary["particle_type"] = "active"
+        dict_summary["num_tiles"] = dict_debug.get("num_tiles")
+        dict_summary["num_candidate_points"] = dict_debug.get("num_candidate_points")
+        dict_summary["num_accepted_masks"] = dict_debug.get("num_accepted_masks")
+        dict_summary["num_bbox_dedup_rejected"] = dict_debug.get("num_bbox_dedup_rejected")
+        self.save_outputs(
+            arr_inputBgr,
+            arr_inputRoiBgr,
+            arr_overlay,
+            list_objects,
+            list_validMasks,
+            dict_summary,
+            dict_roi,
+            dict_debug,
+            arr_raw_masks=arr_masks,
+            arr_restoration_viz=arr_restoration_viz,
+            arr_brightness_filter_viz=arr_bf_viz,
+        )
+
+        return PrimaryParticleResult(
+            list_objects=list_objects,
+            dict_summary=dict_summary,
+        )
+
+    # ----------------------------------------------------------
     # 메인 파이프라인
     # ----------------------------------------------------------
 
     def process_primary(self) -> PrimaryParticleResult:
         """단일 이미지에 대한 1차 입자 분석 파이프라인을 실행한다."""
+        # ── active (활물질) 전용 파이프라인 ─────────────────────
+        if self.obj_primary_config.str_particleType == "active":
+            return self.process_active()
+
         arr_inputBgr = self.load_image_bgr()
         arr_inputRoiBgr, dict_roi = self.extract_inference_roi(arr_inputBgr)
 

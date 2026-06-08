@@ -1,5 +1,6 @@
 요청사항.txt
 __pycache__/
+.venv/
 *.pt
 *.pth
 model/
