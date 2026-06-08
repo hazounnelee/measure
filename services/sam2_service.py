@@ -310,6 +310,7 @@ class Sam2AspectRatioService:
         list_debugTiles = list()
         list_debugPoints = list()
         list_debugHctCircles: tp.List[tp.Dict[str, tp.Any]] = list()
+        list_debugCcContours: tp.List[np.ndarray] = list()
         int_candidateCount = 0
         int_acceptedCount = 0
         int_bboxDedupRejected = 0
@@ -323,17 +324,23 @@ class Sam2AspectRatioService:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
                 list_isolatedMasks: tp.List[np.ndarray] = []
                 try:
-                    list_isolatedMasks, list_posPoints, list_negPoints, list_hctCircles = detect_hct_prompts(
+                    list_isolatedMasks, list_posPoints, list_negPoints, dict_hctInfo = detect_hct_prompts(
                         arr_tileGray=arr_tileGray,
                         int_minDist=self.obj_config.int_pointMinDistance,
                         int_numNeg=self.obj_config.int_numNegativePoints,
                         int_minArea=int(self.obj_config.float_particleAreaThreshold),
                     )
-                    for (int_cx, int_cy, int_cr) in list_hctCircles:
+                    for (int_cx, int_cy, int_cr) in dict_hctInfo["hct_circles"]:
                         list_debugHctCircles.append({
                             "center_roi": [int_tx1 + int_cx, int_ty1 + int_cy],
                             "radius": int_cr,
                         })
+                    int_numHctPos = dict_hctInfo["num_hct_pos"]
+                    for cnt in dict_hctInfo["cc_contours"]:
+                        cnt_roi = cnt.copy()
+                        cnt_roi[:, 0, 0] += int_tx1
+                        cnt_roi[:, 0, 1] += int_ty1
+                        list_debugCcContours.append(cnt_roi)
                 except Exception as exc:
                     print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
 
@@ -365,7 +372,7 @@ class Sam2AspectRatioService:
                     list_keptBboxes.append(tuple_globalBox)
                     list_keptScores.append(None)
 
-                for int_px, int_py in list_posPoints:
+                for int_posIdx, (int_px, int_py) in enumerate(list_posPoints):
                     int_candidateCount += 1
                     list_debugPoints.append(
                         {
@@ -374,6 +381,7 @@ class Sam2AspectRatioService:
                             "point_xy_tile": [int(int_px), int(int_py)],
                             "point_xy_roi": [int_tx1 + int(int_px), int_ty1 + int(int_py)],
                             "label": 1,
+                            "source": "hct" if int_posIdx < int_numHctPos else "cc",
                         }
                     )
                 for int_px, int_py in list_negPoints:
@@ -520,6 +528,7 @@ class Sam2AspectRatioService:
             "tiles": list_debugTiles,
             "candidate_points": list_debugPoints,
             "hct_circles": list_debugHctCircles,
+            "cc_contours": list_debugCcContours,
         }
         return arr_masks, arr_scores, dict_debug
 
@@ -1279,16 +1288,71 @@ class Sam2AspectRatioService:
                               (200, 200, 0), 1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
 
-        list_pts = dict_debug.get("candidate_points", [])
-        if list_pts:
-            arr_pts_viz = arr_inputRoiBgr.copy()
-            for dict_pt in list_pts:
+        # ── 프롬프트 계산 과정 디버그 이미지 (4장) ──────────────────────────
+        list_hct_circles = dict_debug.get("hct_circles", [])
+        list_all_pts = dict_debug.get("candidate_points", [])
+        list_hct_pts = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "hct"]
+        list_cc_pts = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "cc"]
+        list_pos_pts = [p for p in list_all_pts if p.get("label", 1) == 1]
+        list_neg_pts = [p for p in list_all_pts if p.get("label", 0) == 0]
+        list_cc_contours = dict_debug.get("cc_contours", [])
+
+        arr_gray_dbg = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        arr_blur_dbg = cv2.GaussianBlur(arr_gray_dbg, (5, 5), 0)
+        _, arr_binary_dbg = cv2.threshold(
+            arr_blur_dbg, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_binary_bgr = cv2.cvtColor(arr_binary_dbg, cv2.COLOR_GRAY2BGR)
+        arr_binary_inv_bgr = cv2.cvtColor(
+            cv2.bitwise_not(arr_binary_dbg), cv2.COLOR_GRAY2BGR)
+
+        # 1. HCT 원 + HCT positive points → 원본 ROI
+        if list_hct_circles or list_hct_pts:
+            arr_v1 = arr_inputRoiBgr.copy()
+            for dict_c in list_hct_circles:
+                int_cx, int_cy = dict_c["center_roi"]
+                cv2.circle(arr_v1, (int_cx, int_cy), dict_c["radius"], (0, 255, 0), 1)
+            for dict_pt in list_hct_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                int_label = dict_pt.get("label", 1)
-                tpl_color = (0, 255, 255) if int_label == 1 else (255, 255, 0)
-                cv2.circle(arr_pts_viz, (int_px, int_py), 3, tpl_color, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "prompts.png"), arr_pts_viz)
+                cv2.circle(arr_v1, (int_px, int_py), 3, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_1_hct.png"), arr_v1)
+
+        # 2. HCT points + CC points + CC 컨투어 → Otsu 이진화
+        if list_hct_pts or list_cc_pts:
+            arr_v2 = arr_binary_bgr.copy()
+            if list_cc_contours:
+                cv2.drawContours(arr_v2, list_cc_contours, -1, (0, 180, 0), 1)
+            for dict_pt in list_hct_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_v2, (int_px, int_py), 3, (0, 255, 255), -1)
+            for dict_pt in list_cc_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_v2, (int_px, int_py), 3, (255, 128, 0), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_2_cc.png"), arr_v2)
+
+        # 3. 모든 positive points → 반전 이진화
+        if list_pos_pts:
+            arr_v3 = arr_binary_inv_bgr.copy()
+            for dict_pt in list_pos_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_v3, (int_px, int_py), 3, (0, 255, 255), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_3_pos.png"), arr_v3)
+
+        # 4. 모든 positive + negative points → 반전 이진화
+        if list_pos_pts or list_neg_pts:
+            arr_v4 = arr_binary_inv_bgr.copy()
+            for dict_pt in list_pos_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_v4, (int_px, int_py), 3, (0, 255, 255), -1)
+            for dict_pt in list_neg_pts:
+                int_px = int(dict_pt["point_xy_roi"][0])
+                int_py = int(dict_pt["point_xy_roi"][1])
+                cv2.circle(arr_v4, (int_px, int_py), 3, (255, 255, 0), -1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_4_all.png"), arr_v4)
 
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
             arr_raw_viz = arr_inputRoiBgr.copy()
@@ -1310,53 +1374,6 @@ class Sam2AspectRatioService:
         if arr_brightness_filter_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "brightness_filter.png"),
                         arr_brightness_filter_viz)
-
-        # ── HCT + 반전 이진화 디버그 이미지 ──────────────────────────────────
-        list_hct_circles = dict_debug.get("hct_circles", [])
-        list_dbg_pts = dict_debug.get("candidate_points", [])
-        list_pos_pts = [p for p in list_dbg_pts if p.get("label", 1) == 1]
-
-        # 1. HCT 원 이미지 + positive point prompts
-        if list_hct_circles or list_pos_pts:
-            arr_hct_viz = arr_inputRoiBgr.copy()
-            for dict_c in list_hct_circles:
-                int_cx, int_cy = dict_c["center_roi"]
-                cv2.circle(arr_hct_viz, (int_cx, int_cy), dict_c["radius"], (0, 255, 0), 1)
-            for dict_pt in list_pos_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_hct_viz, (int_px, int_py), 3, (0, 255, 255), -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "hct_circles.png"), arr_hct_viz)
-
-        # 2. HCT 원 제거, positive point prompts 모두 표시
-        if list_pos_pts:
-            arr_ppp_viz = arr_inputRoiBgr.copy()
-            for dict_pt in list_pos_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_ppp_viz, (int_px, int_py), 3, (0, 255, 255), -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "hct_prompts.png"), arr_ppp_viz)
-
-        # 3. 반전 이진화 (2장)
-        arr_gray_dbg = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-        arr_blur_dbg = cv2.GaussianBlur(arr_gray_dbg, (5, 5), 0)
-        int_otsu_dbg, arr_binary_dbg = cv2.threshold(
-            arr_blur_dbg, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        arr_binary_inv = cv2.bitwise_not(arr_binary_dbg)
-
-        # 3a. 반전 이진화 + 모드(Otsu 임계값) 표시
-        arr_binv_mode = cv2.cvtColor(arr_binary_inv, cv2.COLOR_GRAY2BGR)
-        cv2.putText(arr_binv_mode, f"Otsu={int_otsu_dbg}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "binary_inv_mode.png"), arr_binv_mode)
-
-        # 3b. 반전 이진화 + positive point prompts
-        arr_binv_pts = cv2.cvtColor(arr_binary_inv, cv2.COLOR_GRAY2BGR)
-        for dict_pt in list_pos_pts:
-            int_px = int(dict_pt["point_xy_roi"][0])
-            int_py = int(dict_pt["point_xy_roi"][1])
-            cv2.circle(arr_binv_pts, (int_px, int_py), 3, (0, 255, 255), -1)
-        cv2.imwrite(str(self.obj_config.path_outputDir / "binary_inv_prompts.png"), arr_binv_pts)
 
         path_csvAll = self.obj_config.path_outputDir / "objects.csv"
         with path_csvAll.open("w", newline="", encoding="utf-8-sig") as obj_f:

@@ -196,7 +196,7 @@ def detect_hct_prompts(
     tp.List[np.ndarray],
     tp.List[tp.Tuple[int, int]],
     tp.List[tp.Tuple[int, int]],
-    tp.List[tp.Tuple[int, int, int]],
+    tp.Dict[str, tp.Any],
 ]:
     """Hough Circle Transform → SAM2 positive/negative prompts.
 
@@ -278,6 +278,8 @@ def detect_hct_prompts(
         )
 
     # ── 3. HCT 미커버 전경 블롭 → fragment/비원형 입자 프롬프트 추가 ─────
+    int_num_hct_pos = len(list_pos)
+    list_cc_contours: tp.List[np.ndarray] = []
     arr_fg = _find_fg_mask(arr_tileGray)
     arr_uncovered = cv2.bitwise_and(arr_fg, cv2.bitwise_not(arr_circles_mask))
     # 3×3 opening: 1px 노이즈만 제거, 작은 fragment 보존 (기존 7×7은 너무 많이 지웠음)
@@ -292,6 +294,8 @@ def detect_hct_prompts(
         # fragment는 부분적으로 어두울 수 있어 0.75× Otsu로 완화 (기존 1.0×)
         if float(arr_tileGray[arr_blob > 0].mean()) < float(int_otsu_val) * 0.75:
             continue
+        list_blob_cnts, _ = cv2.findContours(arr_blob, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        list_cc_contours.extend(list_blob_cnts)
         int_peak = int(np.argmax(arr_uc_dist * arr_blob.astype(np.float32)))
         int_py, int_px = divmod(int_peak, int_w)
         list_pos.append((int_px, int_py))
@@ -305,7 +309,11 @@ def detect_hct_prompts(
         for idx in arr_idx:
             list_neg.append((int(arr_bg_coords[idx, 1]), int(arr_bg_coords[idx, 0])))
 
-    return [], list_pos, list_neg, list_hct_circles
+    return [], list_pos, list_neg, {
+        "hct_circles": list_hct_circles,
+        "num_hct_pos": int_num_hct_pos,
+        "cc_contours": list_cc_contours,
+    }
 
 
 def detect_sphere_roi(
