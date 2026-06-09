@@ -289,7 +289,6 @@ def save_secondary_batch_histograms(
         str_unit=" µm",
         float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
         int_bins_factor=5,
-        float_vline_ref=float_size_ref,
     )
     _save_batch_hist(
         list_vals=list_size_per_image,
@@ -300,7 +299,6 @@ def save_secondary_batch_histograms(
         str_unit=" µm",
         float_xlim_min=float_size_pi_xmin, float_xlim_max=float_size_pi_xmax,
         int_bins_factor=3,
-        float_vline_ref=float_size_ref,
     )
     _save_batch_hist(
         list_vals=list_size_stds,

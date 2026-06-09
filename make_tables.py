@@ -21,7 +21,7 @@ _CLASSIFIED_CANDIDATES = ["classified.png", "06_pipeline_classified.png"]
 _TEMPLATE = Path(__file__).parent / "tables.xlsx"
 
 # 입도 RMSD 기준 (µm)
-_REF_ACTIVE = None
+_REF_ACTIVE = 10.0
 _REF_LARGE = 10.0
 _REF_SMALL = 4.0
 
@@ -155,15 +155,6 @@ def _grade_quartile(
         return 4
 
 
-def _grade_min(
-    g: int, q1: float, q2: float, q3: float, reverse: bool
-) -> float | None:
-    """등급 g의 최솟값(하한). 하한이 없으면 None."""
-    if not reverse:
-        return [None, q1, q2, q3][g - 1]
-    else:
-        return [q3, q2, q1, None][g - 1]
-
 
 def make_tables(
     d_active: dict | None,
@@ -183,7 +174,6 @@ def make_tables(
         (3,  4,  5,  "particle_size_um"),
         (6,  7,  8,  "particle_sphericity_prime"),
         (9,  10, 11, "particle_sphericity"),
-        (12, 13, 14, "fine_particle_ratio_percent_stats"),
     ]
     for row_a, row_l, row_s, key in stat_rows_ind:
         for row, d in ((row_a, d_active), (row_l, d_large), (row_s, d_small)):
@@ -206,8 +196,7 @@ def make_tables(
         _write_row(ws_lot, row, *_lot_stats(d, "particle_size_std_um"))
 
     # 입도 RMSD (µm)
-    if _REF_ACTIVE is not None:
-        _write_row(ws_lot, 9, *_lot_rmsd_stats(d_active, "particle_mean_size_um", "particle_size_std_um", _REF_ACTIVE))
+    _write_row(ws_lot, 9, *_lot_rmsd_stats(d_active, "particle_mean_size_um", "particle_size_std_um", _REF_ACTIVE))
     _write_row(ws_lot, 10, *_lot_rmsd_stats(d_large, "particle_mean_size_um", "particle_size_std_um", _REF_LARGE))
     _write_row(ws_lot, 11, *_lot_rmsd_stats(d_small, "particle_mean_size_um", "particle_size_std_um", _REF_SMALL))
 
@@ -240,13 +229,22 @@ def make_tables(
     q1_sph,  q2_sph,  q3_sph  = _quartiles(d_active, d_large, d_small, "particle_sphericity_mean")
     q1_frag, q2_frag, q3_frag = _quartiles(d_active, d_large, d_small, "fine_particle_ratio_percent")
 
-    grade_rows = [
-        (4,  5,  6,  "particle_size_um.std",            q1_size, q2_size, q3_size, False),
-        (8,  9,  10, "particle_sphericity_prime.mean",   q1_ell,  q2_ell,  q3_ell,  True),
-        (12, 13, 14, "particle_sphericity.mean",          q1_sph,  q2_sph,  q3_sph,  True),
-        (16, 17, 18, "fine_particle_ratio_percent",       q1_frag, q2_frag, q3_frag, False),
+    grade_defs = [
+        (3,  4,  5,  6,  "particle_size_um.std",            q1_size, q2_size, q3_size, False),
+        (7,  8,  9,  10, "particle_sphericity_prime.mean",   q1_ell,  q2_ell,  q3_ell,  True),
+        (11, 12, 13, 14, "particle_sphericity.mean",          q1_sph,  q2_sph,  q3_sph,  True),
+        (15, 16, 17, 18, "fine_particle_ratio_percent",       q1_frag, q2_frag, q3_frag, False),
     ]
-    for row_a, row_l, row_s, val_key, q1, q2, q3, reverse in grade_rows:
+    for row_r, row_a, row_l, row_s, val_key, q1, q2, q3, reverse in grade_defs:
+        if not reverse:
+            ws_grade.cell(row=row_r, column=3).value = round(q1, 4)
+            ws_grade.cell(row=row_r, column=4).value = round(q2, 4)
+            ws_grade.cell(row=row_r, column=5).value = round(q3, 4)
+        else:
+            ws_grade.cell(row=row_r, column=3).value = round(q3, 4)
+            ws_grade.cell(row=row_r, column=4).value = round(q2, 4)
+            ws_grade.cell(row=row_r, column=5).value = round(q1, 4)
+
         for row, d in ((row_a, d_active), (row_l, d_large), (row_s, d_small)):
             if d is None:
                 continue
@@ -254,9 +252,7 @@ def make_tables(
             if value is None:
                 continue
             g = _grade_quartile(value, q1, q2, q3, reverse=reverse)
-            min_val = _grade_min(g, q1, q2, q3, reverse)
-            if min_val is not None:
-                ws_grade.cell(row=row, column=g + 2).value = round(min_val, 4)
+            ws_grade.cell(row=row, column=g + 2).value = round(value, 4)
 
     wb.save(path_output)
     print(f"[done] {path_output}")
