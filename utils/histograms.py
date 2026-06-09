@@ -177,13 +177,9 @@ def _save_batch_hist(
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
                                 float_xlim_min, float_xlim_max, int_bins_factor)
             if float_vline_ref is not None:
-                obj_ax.axvline(float_vline_ref, linestyle="-", linewidth=2.0, color="#dd2222")
-                obj_ax.text(
-                    float_vline_ref, 0.62,
-                    f"ref\n{float_vline_ref:.2f}{str_unit}",
-                    transform=obj_ax.get_xaxis_transform(),
-                    color="#dd2222", fontsize=7.5, va="top", ha="left", linespacing=1.2,
-                )
+                xl, xr = obj_ax.get_xlim()
+                if xl <= float_vline_ref <= xr:
+                    obj_ax.axvline(float_vline_ref, linestyle="-", linewidth=2.0, color="#dd2222")
         else:
             obj_ax.text(0.5, 0.5, "No data", ha="center", va="center",
                         transform=obj_ax.transAxes, fontsize=13, color="#666666")
