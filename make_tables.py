@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""batch_summary.json(대입경/소입경)으로부터 기초통계량 및 등급화 Excel 표 생성."""
+"""batch_summary.json(활물질/대입경/소입경)으로부터 기초통계량 및 등급화 Excel 표 생성."""
 import argparse
 import json
 import math
@@ -21,6 +21,7 @@ _CLASSIFIED_CANDIDATES = ["classified.png", "06_pipeline_classified.png"]
 _TEMPLATE = Path(__file__).parent / "tables.xlsx"
 
 # 입도 RMSD 기준 (µm)
+_REF_ACTIVE = None
 _REF_LARGE = 10.0
 _REF_SMALL = 4.0
 
@@ -62,12 +63,12 @@ def _safe_float(v) -> float | None:
 
 
 def _quartiles(
-    d1: dict | None, d2: dict | None, per_image_key: str
+    d1: dict | None, d2: dict | None, d3: dict | None, per_image_key: str
 ) -> tuple[float, float, float]:
-    """두 배치의 per-image 값을 모아 Q1/Q2/Q3 반환."""
+    """세 배치의 per-image 값을 모아 Q1/Q2/Q3 반환."""
     import numpy as np
     vals = []
-    for d in (d1, d2):
+    for d in (d1, d2, d3):
         if d is None:
             continue
         for img_id_entry in d.get("img_ids", []):
@@ -165,6 +166,7 @@ def _grade_min(
 
 
 def make_tables(
+    d_active: dict | None,
     d_large: dict | None,
     d_small: dict | None,
     path_template: Path,
@@ -176,16 +178,15 @@ def make_tables(
     wb = openpyxl.load_workbook(path_output)
 
     # ── 기초통계량 (개별 입자) ────────────────────────────────────────────
-    # 배치 전체 집계값 사용. 열: C=평균, D=중앙값, E=표준편차
     ws_ind = wb["기초통계량 및 처리 시간 (개별 입자)"]
     stat_rows_ind = [
-        (3,  4,  "particle_size_um"),
-        (5,  6,  "particle_sphericity_prime"),
-        (7,  8,  "particle_sphericity"),
-        (9,  10, "fine_particle_ratio_percent_stats"),
+        (3,  4,  5,  "particle_size_um"),
+        (6,  7,  8,  "particle_sphericity_prime"),
+        (9,  10, 11, "particle_sphericity"),
+        (12, 13, 14, "fine_particle_ratio_percent_stats"),
     ]
-    for row_l, row_s, key in stat_rows_ind:
-        for row, d in ((row_l, d_large), (row_s, d_small)):
+    for row_a, row_l, row_s, key in stat_rows_ind:
+        for row, d in ((row_a, d_active), (row_l, d_large), (row_s, d_small)):
             if d is None:
                 continue
             s = d.get(key)
@@ -194,35 +195,36 @@ def make_tables(
             _write_row(ws_ind, row, float(s["mean"]), float(s["median"]), float(s["std"]))
 
     # ── 기초통계량 (LOT 평균) ─────────────────────────────────────────────
-    # per-file 값을 모아 mean/median/std 계산
     ws_lot = wb["기초통계량 및 처리 시간 (LOT)"]
 
-    # 입도 (µm) — per-file mean
-    for row, d in ((3, d_large), (4, d_small)):
+    # 입도 (µm)
+    for row, d in ((3, d_active), (4, d_large), (5, d_small)):
         _write_row(ws_lot, row, *_lot_stats(d, "particle_mean_size_um"))
 
-    # 입도 표준편차 (µm) — per-file std
-    for row, d in ((5, d_large), (6, d_small)):
+    # 입도 표준편차 (µm)
+    for row, d in ((6, d_active), (7, d_large), (8, d_small)):
         _write_row(ws_lot, row, *_lot_stats(d, "particle_size_std_um"))
 
-    # 입도 RMSD (µm) — per-file sqrt(std²+(mean-ref)²)
-    _write_row(ws_lot, 7, *_lot_rmsd_stats(d_large, "particle_mean_size_um", "particle_size_std_um", _REF_LARGE))
-    _write_row(ws_lot, 8, *_lot_rmsd_stats(d_small, "particle_mean_size_um", "particle_size_std_um", _REF_SMALL))
+    # 입도 RMSD (µm)
+    if _REF_ACTIVE is not None:
+        _write_row(ws_lot, 9, *_lot_rmsd_stats(d_active, "particle_mean_size_um", "particle_size_std_um", _REF_ACTIVE))
+    _write_row(ws_lot, 10, *_lot_rmsd_stats(d_large, "particle_mean_size_um", "particle_size_std_um", _REF_LARGE))
+    _write_row(ws_lot, 11, *_lot_rmsd_stats(d_small, "particle_mean_size_um", "particle_size_std_um", _REF_SMALL))
 
-    # 타원도 — per-file sphericity_prime mean
-    for row, d in ((9, d_large), (10, d_small)):
+    # 타원도
+    for row, d in ((12, d_active), (13, d_large), (14, d_small)):
         _write_row(ws_lot, row, *_lot_stats(d, "particle_sphericity_prime_mean"))
 
-    # 구형도 — per-file sphericity mean
-    for row, d in ((11, d_large), (12, d_small)):
+    # 구형도
+    for row, d in ((15, d_active), (16, d_large), (17, d_small)):
         _write_row(ws_lot, row, *_lot_stats(d, "particle_sphericity_mean"))
 
-    # 미분/깨짐 비율 — per-file ratio
-    for row, d in ((13, d_large), (14, d_small)):
+    # 미분/깨짐 비율
+    for row, d in ((18, d_active), (19, d_large), (20, d_small)):
         _write_row(ws_lot, row, *_lot_stats(d, "fine_particle_ratio_percent"))
 
-    # 이미지 당 처리 시간 — 배치 집계값
-    for row, d in ((15, d_large), (16, d_small)):
+    # 이미지 당 처리 시간
+    for row, d in ((21, d_active), (22, d_large), (23, d_small)):
         if d is None:
             continue
         s = d.get("processing_time_sec")
@@ -233,19 +235,19 @@ def make_tables(
     # ── 등급화 ────────────────────────────────────────────────────────────
     ws_grade = wb["등급화"]
 
-    q1_size, q2_size, q3_size = _quartiles(d_large, d_small, "particle_size_std_um")
-    q1_ell,  q2_ell,  q3_ell  = _quartiles(d_large, d_small, "particle_sphericity_prime_mean")
-    q1_sph,  q2_sph,  q3_sph  = _quartiles(d_large, d_small, "particle_sphericity_mean")
-    q1_frag, q2_frag, q3_frag = _quartiles(d_large, d_small, "fine_particle_ratio_percent")
+    q1_size, q2_size, q3_size = _quartiles(d_active, d_large, d_small, "particle_size_std_um")
+    q1_ell,  q2_ell,  q3_ell  = _quartiles(d_active, d_large, d_small, "particle_sphericity_prime_mean")
+    q1_sph,  q2_sph,  q3_sph  = _quartiles(d_active, d_large, d_small, "particle_sphericity_mean")
+    q1_frag, q2_frag, q3_frag = _quartiles(d_active, d_large, d_small, "fine_particle_ratio_percent")
 
     grade_rows = [
-        (4,  5,  "particle_size_um.std",            q1_size, q2_size, q3_size, False),
-        (7,  8,  "particle_sphericity_prime.mean",   q1_ell,  q2_ell,  q3_ell,  True),
-        (10, 11, "particle_sphericity.mean",          q1_sph,  q2_sph,  q3_sph,  True),
-        (13, 14, "fine_particle_ratio_percent",       q1_frag, q2_frag, q3_frag, False),
+        (4,  5,  6,  "particle_size_um.std",            q1_size, q2_size, q3_size, False),
+        (8,  9,  10, "particle_sphericity_prime.mean",   q1_ell,  q2_ell,  q3_ell,  True),
+        (12, 13, 14, "particle_sphericity.mean",          q1_sph,  q2_sph,  q3_sph,  True),
+        (16, 17, 18, "fine_particle_ratio_percent",       q1_frag, q2_frag, q3_frag, False),
     ]
-    for row_l, row_s, val_key, q1, q2, q3, reverse in grade_rows:
-        for row, d in ((row_l, d_large), (row_s, d_small)):
+    for row_a, row_l, row_s, val_key, q1, q2, q3, reverse in grade_rows:
+        for row, d in ((row_a, d_active), (row_l, d_large), (row_s, d_small)):
             if d is None:
                 continue
             value = _get(d, val_key)
@@ -357,7 +359,7 @@ def export_grade_images(
         "구형도":        (q1_sph,  q2_sph,  q3_sph,  True),
         "미분_깨짐":     (q1_frag, q2_frag, q3_frag, False),
     }
-    rmsd_ref = {"large": _REF_LARGE, "small": _REF_SMALL}.get(label)
+    rmsd_ref = {"active": _REF_ACTIVE, "large": _REF_LARGE, "small": _REF_SMALL}.get(label)
 
     copied = 0
     for img_id_entry in d.get("img_ids", []):
@@ -394,6 +396,8 @@ def main() -> None:
         description="batch_summary.json → 기초통계량/등급화 Excel 표 생성",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--active", metavar="JSON", default=None,
+                        help="활물질 batch_summary.json 경로")
     parser.add_argument("--large", metavar="JSON", default=None,
                         help="대입경 batch_summary.json 경로")
     parser.add_argument("--small", metavar="JSON", default=None,
@@ -406,9 +410,10 @@ def main() -> None:
                         help="등급별 이미지 쌍(input_roi+classified)을 내보낼 최상위 디렉토리")
     args = parser.parse_args()
 
-    if args.large is None and args.small is None:
-        parser.error("--large / --small 중 하나 이상 지정하세요.")
+    if args.active is None and args.large is None and args.small is None:
+        parser.error("--active / --large / --small 중 하나 이상 지정하세요.")
 
+    d_active = _load(args.active)
     d_large = _load(args.large)
     d_small = _load(args.small)
 
@@ -417,15 +422,21 @@ def main() -> None:
         print(f"[ERROR] 템플릿 없음: {path_template}", file=sys.stderr)
         sys.exit(1)
 
-    make_tables(d_large, d_small, path_template, Path(args.output))
+    make_tables(d_active, d_large, d_small, path_template, Path(args.output))
 
     if args.grade_images:
         path_gi = Path(args.grade_images)
-        q1_size, q2_size, q3_size = _quartiles(d_large, d_small, "particle_size_std_um")
-        q1_ell,  q2_ell,  q3_ell  = _quartiles(d_large, d_small, "particle_sphericity_prime_mean")
-        q1_sph,  q2_sph,  q3_sph  = _quartiles(d_large, d_small, "particle_sphericity_mean")
-        q1_frag, q2_frag, q3_frag = _quartiles(d_large, d_small, "fine_particle_ratio_percent")
+        q1_size, q2_size, q3_size = _quartiles(d_active, d_large, d_small, "particle_size_std_um")
+        q1_ell,  q2_ell,  q3_ell  = _quartiles(d_active, d_large, d_small, "particle_sphericity_prime_mean")
+        q1_sph,  q2_sph,  q3_sph  = _quartiles(d_active, d_large, d_small, "particle_sphericity_mean")
+        q1_frag, q2_frag, q3_frag = _quartiles(d_active, d_large, d_small, "fine_particle_ratio_percent")
         print("[grade-images]")
+        if d_active is not None:
+            export_grade_images(d_active, "active", path_gi,
+                                q1_size, q2_size, q3_size,
+                                q1_ell,  q2_ell,  q3_ell,
+                                q1_sph,  q2_sph,  q3_sph,
+                                q1_frag, q2_frag, q3_frag)
         if d_large is not None:
             export_grade_images(d_large, "large", path_gi,
                                 q1_size, q2_size, q3_size,
