@@ -1293,6 +1293,16 @@ class Sam2AspectRatioService:
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_Sp.png"),
                     self._append_stats_bar(arr_overlay_Sp, dict_summary))
 
+        # 파이프라인 단계별 이미지
+        list_tiles = dict_debug.get("tiles", [])
+        if list_tiles:
+            arr_tiles_viz = arr_inputRoiBgr.copy()
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                cv2.rectangle(arr_tiles_viz, (int_tx1, int_ty1), (int_tx2, int_ty2),
+                              (200, 200, 0), 1)
+            cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
+
         # ── 프롬프트 계산 과정 디버그 이미지 (4장) ──────────────────────────
         list_hct_circles = dict_debug.get("hct_circles", [])
         list_all_pts = dict_debug.get("candidate_points", [])
