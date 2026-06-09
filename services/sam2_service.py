@@ -1320,19 +1320,22 @@ class Sam2AspectRatioService:
         arr_binary_inv_bgr = cv2.cvtColor(
             cv2.bitwise_not(arr_binary_dbg), cv2.COLOR_GRAY2BGR)
 
+        tpl_new = (0, 0, 255)    # 빨강: 이번 단계에서 새로 추가된 점
+        tpl_old = (0, 0, 0)      # 검정: 이전 단계에서 이미 있던 점
+
         # 1. HCT 원 + HCT positive points → 원본 ROI
         if list_hct_circles or list_hct_pts:
             arr_v1 = arr_inputRoiBgr.copy()
             for dict_c in list_hct_circles:
                 int_cx, int_cy = dict_c["center_roi"]
-                cv2.circle(arr_v1, (int_cx, int_cy), dict_c["radius"], (0, 255, 0), 1)
+                cv2.circle(arr_v1, (int_cx, int_cy), dict_c["radius"], tpl_new, 1)
             for dict_pt in list_hct_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v1, (int_px, int_py), 3, (0, 255, 255), -1)
+                cv2.circle(arr_v1, (int_px, int_py), 3, tpl_new, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_1_hct.png"), arr_v1)
 
-        # 2. HCT points + CC points + CC 컨투어 → Otsu 이진화
+        # 2. HCT points(기존=검정) + CC points(신규=빨강) + CC 컨투어 → Otsu 이진화
         if list_hct_pts or list_cc_pts:
             arr_v2 = arr_binary_bgr.copy()
             if list_cc_contours:
@@ -1340,33 +1343,33 @@ class Sam2AspectRatioService:
             for dict_pt in list_hct_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v2, (int_px, int_py), 3, (0, 255, 255), -1)
+                cv2.circle(arr_v2, (int_px, int_py), 3, tpl_old, -1)
             for dict_pt in list_cc_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v2, (int_px, int_py), 3, (255, 128, 0), -1)
+                cv2.circle(arr_v2, (int_px, int_py), 3, tpl_new, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_2_cc.png"), arr_v2)
 
-        # 3. 모든 positive points → 반전 이진화
+        # 3. positive points 전체(기존=검정) → 반전 이진화 (신규 없음, 누적 확인용)
         if list_pos_pts:
             arr_v3 = arr_binary_inv_bgr.copy()
             for dict_pt in list_pos_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v3, (int_px, int_py), 3, (0, 255, 255), -1)
+                cv2.circle(arr_v3, (int_px, int_py), 3, tpl_old, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_3_pos.png"), arr_v3)
 
-        # 4. 모든 positive + negative points → 반전 이진화
+        # 4. positive(기존=검정) + negative(신규=빨강) → 반전 이진화
         if list_pos_pts or list_neg_pts:
             arr_v4 = arr_binary_inv_bgr.copy()
             for dict_pt in list_pos_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v4, (int_px, int_py), 3, (0, 255, 255), -1)
+                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_old, -1)
             for dict_pt in list_neg_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v4, (int_px, int_py), 3, (255, 255, 0), -1)
+                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_new, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_4_all.png"), arr_v4)
 
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
