@@ -1448,6 +1448,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         float_dedupIou: float,
         float_bboxDedupIou: float,
         bool_usePointPrompts: bool,
+        str_promptMode: str,
         float_scalePixels: float,
         float_scaleMicrometers: float,
         str_device: tp.Optional[str],
@@ -1498,6 +1499,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_usePointPrompts=bool_usePointPrompts,
+            str_promptMode=str_promptMode,
             float_scalePixels=float_scalePixels,
             float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,
@@ -1681,6 +1683,7 @@ def run_primary_particle_analysis(
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
+    str_promptMode: str = "hct",
     # 스케일
     float_scalePixels: float = CONST_SCALE_PIXELS,
     float_scaleMicrometers: float = CONST_SCALE_MICROMETERS,
@@ -1751,6 +1754,7 @@ def run_primary_particle_analysis(
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_usePointPrompts=bool_usePointPrompts,
+            str_promptMode=str_promptMode,
             float_scalePixels=float_scalePixels,
             float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,
@@ -1986,6 +1990,11 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
         "--use_point_prompts",
         action=argparse.BooleanOptionalAction, default=True,
         help="OpenCV 후보점 기반 point prompt 추론 사용 여부")
+    obj_parser.add_argument(
+        "--prompt_mode", default="hct", choices=["hct", "legacy"],
+        help="포인트 프롬프트 추출 방식. "
+             "'hct': HCT+CC 기반 (기본값). "
+             "'legacy': goodFeaturesToTrack 텍스처 기반 (negative 없음).")
 
     # Mask 후처리
     obj_parser.add_argument(

@@ -13,7 +13,7 @@ import yaml
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
-from utils.image import draw_label_no_overlap, create_processing_tiles, find_dist_transform_peaks, detect_hct_prompts
+from utils.image import draw_label_no_overlap, create_processing_tiles, find_dist_transform_peaks, detect_hct_prompts, sample_legacy_prompts
 from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
@@ -323,26 +323,41 @@ class Sam2AspectRatioService:
             if self.obj_config.bool_usePointPrompts:
                 arr_tileGray = arr_inputGray[int_ty1:int_ty2, int_tx1:int_tx2].copy()
                 list_isolatedMasks: tp.List[np.ndarray] = []
-                try:
-                    list_isolatedMasks, list_posPoints, list_negPoints, dict_hctInfo = detect_hct_prompts(
-                        arr_tileGray=arr_tileGray,
-                        int_minDist=self.obj_config.int_pointMinDistance,
-                        int_numNeg=self.obj_config.int_numNegativePoints,
-                        int_minArea=int(self.obj_config.float_particleAreaThreshold),
-                    )
-                    for (int_cx, int_cy, int_cr) in dict_hctInfo["hct_circles"]:
-                        list_debugHctCircles.append({
-                            "center_roi": [int_tx1 + int_cx, int_ty1 + int_cy],
-                            "radius": int_cr,
-                        })
-                    int_numHctPos = dict_hctInfo["num_hct_pos"]
-                    for cnt in dict_hctInfo["cc_contours"]:
-                        cnt_roi = cnt.copy()
-                        cnt_roi[:, 0, 0] += int_tx1
-                        cnt_roi[:, 0, 1] += int_ty1
-                        list_debugCcContours.append(cnt_roi)
-                except Exception as exc:
-                    print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
+                int_numHctPos = 0
+
+                if self.obj_config.str_promptMode == "legacy":
+                    # ── 레거시: goodFeaturesToTrack 기반 (positive only) ──
+                    try:
+                        list_posPoints = sample_legacy_prompts(
+                            arr_tileGray,
+                            int_maxPoints=self.obj_config.int_pointsPerTile,
+                            int_minDistance=self.obj_config.int_pointMinDistance,
+                            float_qualityLevel=self.obj_config.float_pointQualityLevel,
+                        )
+                    except Exception as exc:
+                        print(f"[WARN] tile {int_tileIdx} legacy 포인트 추출 실패 (skip): {exc}", flush=True)
+                else:
+                    # ── HCT 방식 (기본) ──────────────────────────────────
+                    try:
+                        list_isolatedMasks, list_posPoints, list_negPoints, dict_hctInfo = detect_hct_prompts(
+                            arr_tileGray=arr_tileGray,
+                            int_minDist=self.obj_config.int_pointMinDistance,
+                            int_numNeg=self.obj_config.int_numNegativePoints,
+                            int_minArea=int(self.obj_config.float_particleAreaThreshold),
+                        )
+                        for (int_cx, int_cy, int_cr) in dict_hctInfo["hct_circles"]:
+                            list_debugHctCircles.append({
+                                "center_roi": [int_tx1 + int_cx, int_ty1 + int_cy],
+                                "radius": int_cr,
+                            })
+                        int_numHctPos = dict_hctInfo["num_hct_pos"]
+                        for cnt in dict_hctInfo["cc_contours"]:
+                            cnt_roi = cnt.copy()
+                            cnt_roi[:, 0, 0] += int_tx1
+                            cnt_roi[:, 0, 1] += int_ty1
+                            list_debugCcContours.append(cnt_roi)
+                    except Exception as exc:
+                        print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
 
                 # ── isolated 마스크: OpenCV 직접 수용 ──────────────────────────
                 for arr_tileMask in list_isolatedMasks:

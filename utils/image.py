@@ -316,6 +316,93 @@ def detect_hct_prompts(
     }
 
 
+def _normalize_to_uint8(arr: np.ndarray) -> np.ndarray:
+    float_min, float_max = float(arr.min()), float(arr.max())
+    if float_max - float_min < 1e-6:
+        return np.zeros_like(arr, dtype=np.uint8)
+    return ((arr - float_min) / (float_max - float_min) * 255).astype(np.uint8)
+
+
+def _enhance_image_texture(arr_tileGray: np.ndarray) -> np.ndarray:
+    """CLAHE + gradient + blackhat + Laplacian 텍스처 강화."""
+    obj_clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    arr_img = obj_clahe.apply(arr_tileGray)
+    arr_blur = cv2.GaussianBlur(arr_img, (3, 3), 0)
+
+    arr_kernelGrad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    arr_grad = cv2.morphologyEx(arr_blur, cv2.MORPH_GRADIENT, arr_kernelGrad)
+
+    arr_kernelBh = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    arr_blackhat = cv2.morphologyEx(arr_blur, cv2.MORPH_BLACKHAT, arr_kernelBh)
+
+    arr_lap = cv2.Laplacian(arr_blur, cv2.CV_32F, ksize=3)
+    arr_lapAbs = _normalize_to_uint8(np.abs(arr_lap))
+
+    arr_combined = cv2.addWeighted(arr_grad, 0.45, arr_blackhat, 0.35, 0)
+    arr_combined = cv2.addWeighted(arr_combined, 0.8, arr_lapAbs, 0.2, 0)
+    return _normalize_to_uint8(arr_combined)
+
+
+def sample_legacy_prompts(
+    arr_tileGray: np.ndarray,
+    int_maxPoints: int = 80,
+    int_minDistance: int = 14,
+    float_qualityLevel: float = 0.03,
+) -> tp.List[tp.Tuple[int, int]]:
+    """goodFeaturesToTrack 기반 레거시 포인트 프롬프트 추출.
+
+    텍스처 강화 → goodFeaturesToTrack (1차) → Otsu 컨투어 centroid (fallback)
+    → greedy distance filter.
+    """
+    arr_enhanced = _enhance_image_texture(arr_tileGray)
+
+    # 1차: goodFeaturesToTrack
+    arr_corners = cv2.goodFeaturesToTrack(
+        arr_enhanced,
+        maxCorners=int_maxPoints * 4,
+        qualityLevel=float_qualityLevel,
+        minDistance=int_minDistance,
+        blockSize=5,
+        mask=None,
+        useHarrisDetector=False,
+    )
+    list_candidates: tp.List[tp.Tuple[int, int, float]] = []
+    if arr_corners is not None:
+        for pt in arr_corners:
+            int_px, int_py = int(pt[0, 0]), int(pt[0, 1])
+            float_score = float(arr_enhanced[int_py, int_px])
+            list_candidates.append((int_px, int_py, float_score))
+
+    # fallback: Otsu 컨투어 centroid
+    if len(list_candidates) < max(8, int_maxPoints // 2):
+        _, arr_th = cv2.threshold(arr_enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_kernelOpen = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        arr_th = cv2.morphologyEx(arr_th, cv2.MORPH_OPEN, arr_kernelOpen)
+        list_cnts, _ = cv2.findContours(arr_th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in list_cnts:
+            float_area = float(cv2.contourArea(cnt))
+            if float_area < 4 or float_area > 400:
+                continue
+            M = cv2.moments(cnt)
+            if M["m00"] <= 0:
+                continue
+            int_cx = int(M["m10"] / M["m00"])
+            int_cy = int(M["m01"] / M["m00"])
+            float_score = float(arr_enhanced[int_cy, int_cx]) + float_area
+            list_candidates.append((int_cx, int_cy, float_score))
+
+    # greedy distance filter
+    list_candidates.sort(key=lambda c: c[2], reverse=True)
+    list_kept: tp.List[tp.Tuple[int, int]] = []
+    for int_cx, int_cy, _ in list_candidates:
+        if len(list_kept) >= int_maxPoints:
+            break
+        if all(abs(int_cx - kx) >= int_minDistance or abs(int_cy - ky) >= int_minDistance
+               for kx, ky in list_kept):
+            list_kept.append((int_cx, int_cy))
+    return list_kept
+
+
 def detect_sphere_roi(
     arr_image_bgr: np.ndarray,
     float_cap_fraction: float = 0.65,

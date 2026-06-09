@@ -231,6 +231,7 @@ def run_secondary_particle_analysis(
     float_dedupIou: float = CONST_DEFAULT_DEDUP_IOU,
     float_bboxDedupIou: float = CONST_DEFAULT_BBOX_DEDUP_IOU,
     bool_usePointPrompts: bool = CONST_DEFAULT_USE_POINT_PROMPTS,
+    str_promptMode: str = "hct",
     float_scalePixels: tp.Optional[float] = None,
     float_scaleMicrometers: tp.Optional[float] = None,
     str_device: tp.Optional[str] = None,
@@ -282,6 +283,7 @@ def run_secondary_particle_analysis(
             float_dedupIou=float_dedupIou,
             float_bboxDedupIou=float_bboxDedupIou,
             bool_usePointPrompts=bool_usePointPrompts,
+            str_promptMode=str_promptMode,
             float_scalePixels=float_scalePixels,
             float_scaleMicrometers=float_scaleMicrometers,
             str_device=str_device,
@@ -499,6 +501,10 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
     obj_parser.add_argument("--bbox_dedup_iou", type=float, default=CONST_DEFAULT_BBOX_DEDUP_IOU)
     obj_parser.add_argument("--use_point_prompts", action=argparse.BooleanOptionalAction,
                             default=CONST_DEFAULT_USE_POINT_PROMPTS)
+    obj_parser.add_argument("--prompt_mode", default="hct", choices=["hct", "legacy"],
+                            help="포인트 프롬프트 추출 방식. "
+                                 "'hct': HCT+CC 기반 (기본값). "
+                                 "'legacy': goodFeaturesToTrack 텍스처 기반 (negative 없음).")
     obj_parser.add_argument("--scale_pixels", type=float, default=None,
                             help="스케일 기준 pixel 수. 미지정 시 --magnification 또는 기본값(74) 사용. "
                                  "20k@1024=74, 50k@1024=185")

@@ -119,6 +119,7 @@ def main() -> None:
         float_dedupIou=obj_args.dedup_iou,
         float_bboxDedupIou=obj_args.bbox_dedup_iou,
         bool_usePointPrompts=obj_args.use_point_prompts,
+        str_promptMode=obj_args.prompt_mode,
         bool_autoCenterCrop=obj_args.auto_center_crop,
         float_centerCropRatio=obj_args.center_crop_ratio,
         bool_saveIndividualMasks=obj_args.save_mask_imgs,
