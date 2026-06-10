@@ -1611,15 +1611,15 @@ class Sam2AspectRatioService:
                         ).astype(arr_masks[int_i].dtype)
             arr_masks = arr_masks_punched
 
-        # 겹침 영역 상호 배제: 두 마스크가 겹치면 교집합을 양쪽 모두에서 제거
+        # 겹침 영역 상호 배제 (밝기 필터 전용): 겹치는 픽셀을 양쪽에서 제거
+        arr_masks_bf = arr_masks
         if len(arr_masks) > 1:
-            int_n_masks = len(arr_masks)
             arr_overlap_count = np.zeros(arr_masks[0].shape, dtype=np.int32)
             for arr_m in arr_masks:
                 arr_overlap_count += (arr_m > 0).astype(np.int32)
             arr_shared = arr_overlap_count >= 2
             if arr_shared.any():
-                arr_masks = [
+                arr_masks_bf = [
                     (arr_m.astype(bool) & ~arr_shared).astype(arr_m.dtype)
                     for arr_m in arr_masks
                 ]
@@ -1641,7 +1641,7 @@ class Sam2AspectRatioService:
                                 (int_w_viz * 2, int_h_viz * 2),
                                 interpolation=cv2.INTER_LINEAR)
         list_bf_placed: tp.List[tp.Tuple[int, int, int, int]] = []
-        for arr_m in arr_masks:
+        for arr_m in arr_masks_bf:
             arr_mb = arr_m.astype(bool)
             if not arr_mb.any():
                 continue
@@ -1671,10 +1671,10 @@ class Sam2AspectRatioService:
                 float_s = float(arr_scores[int_index])
                 float_confidence = None if math.isnan(float_s) else float_s
 
-            # 밝기 필터: 마스크 영역 평균 밝기가 Otsu×k 미만이면 배경으로 제거
-            arr_mask_bool = arr_mask.astype(bool)
-            if arr_mask_bool.any():
-                float_mean_brightness = float(arr_gray_roi[arr_mask_bool].mean())
+            # 밝기 필터: 겹침 배제된 마스크 기준으로 평균 밝기 판단
+            arr_mask_bf = arr_masks_bf[int_index].astype(bool)
+            if arr_mask_bf.any():
+                float_mean_brightness = float(arr_gray_roi[arr_mask_bf].mean())
                 if float_mean_brightness < float_brightness_thresh:
                     continue
 
