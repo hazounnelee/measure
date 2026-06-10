@@ -42,6 +42,8 @@ class Sam2AspectRatioConfig:
     bool_retinaMasks: bool = True
     bool_saveIndividualMasks: bool = True
     bool_useEqDiameter: bool = True
+    float_brightnessK: float = 0.5
+    float_punchOverlapThresh: float = 0.97
     bool_debug: bool = False
 
 

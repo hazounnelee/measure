@@ -241,6 +241,9 @@ def run_secondary_particle_analysis(
     int_preprocessWidth: int = 1024,
     int_numGpus: int = 1,
     bool_useOpenCV: bool = False,
+    int_numNegativePoints: int = 3,
+    float_brightnessK: float = 0.5,
+    float_punchOverlapThresh: float = 0.97,
     bool_debug: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
@@ -292,6 +295,9 @@ def run_secondary_particle_analysis(
             bool_useEqDiameter=bool_useEqDiameter,
             int_preprocessWidth=int_preprocessWidth,
             bool_useOpenCV=bool_useOpenCV,
+            int_numNegativePoints=int_numNegativePoints,
+            float_brightnessK=float_brightnessK,
+            float_punchOverlapThresh=float_punchOverlapThresh,
             bool_debug=bool_debug,
         )
 
@@ -523,6 +529,12 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             help="멀티 GPU 병렬 처리 수. GPU가 여러 장이면 이미지를 분산 처리. 기본값: 1.")
     obj_parser.add_argument("--opencv", action=argparse.BooleanOptionalAction, default=False,
                             help="SAM2 대신 OpenCV CLAHE+Otsu 기반 세그멘테이션을 사용한다. 빠르지만 단순함.")
+    obj_parser.add_argument("--num_negative_points", type=int, default=3,
+                            help="타일당 negative point prompt 개수 (기본값: 3)")
+    obj_parser.add_argument("--brightness_k", type=float, default=0.5,
+                            help="밝기 필터 k: Otsu×k 미만이면 배경으로 제거 (기본값: 0.5)")
+    obj_parser.add_argument("--punch_overlap_thresh", type=float, default=0.97,
+                            help="마스크 겹침 펀치 임계값: 작은 마스크가 이 비율 이상 포함되면 큰 마스크에서 제거 (기본값: 0.97)")
     obj_parser.add_argument("--debug", action="store_true", default=False,
                             help="디버그 이미지/파일 저장 (tiles, prompts, masks_raw, overlay, CSV, JSON 등).")
     return obj_parser

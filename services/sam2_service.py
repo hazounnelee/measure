@@ -1569,7 +1569,7 @@ class Sam2AspectRatioService:
         # ② 가려진 입자 보정  ③ 땅콩 분리
         arr_masks, arr_scores = self._postprocess_masks(arr_masks, arr_scores)
 
-        # 포함 관계 펀치: 작은 마스크가 큰 마스크에 97%+ 포함되면 큰 마스크에서 제거
+        # 포함 관계 펀치: 작은 마스크가 큰 마스크에 일정 비율 이상 포함되면 큰 마스크에서 제거
         # → 이후 밝기 필터는 펀치된 마스크(입자 테두리 영역) 기준으로 판단
         if len(arr_masks) > 1:
             arr_masks_areas = np.array([m.sum() for m in arr_masks], dtype=np.int64)
@@ -1599,7 +1599,7 @@ class Sam2AspectRatioService:
                     int_overlap = int(
                         (arr_masks[int_i].astype(bool) & arr_masks[int_j].astype(bool)).sum()
                     )
-                    if int_overlap / int_area_j >= 0.97:
+                    if int_overlap / int_area_j >= self.obj_config.float_punchOverlapThresh:
                         arr_masks_punched[int_i] = (
                             arr_masks_punched[int_i].astype(bool)
                             & ~arr_masks[int_j].astype(bool)
@@ -1611,11 +1611,11 @@ class Sam2AspectRatioService:
 
         arr_restoration_viz = arr_inputRoiBgr.copy()
 
-        # 밝기 필터 기준: Otsu 임계값의 절반 미만 평균 밝기 → 배경으로 간주
+        # 밝기 필터 기준: Otsu 임계값 × k 미만 평균 밝기 → 배경으로 간주
         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
         int_otsu_global, _ = cv2.threshold(
             arr_gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        float_brightness_thresh = float(int_otsu_global) * 0.5
+        float_brightness_thresh = float(int_otsu_global) * self.obj_config.float_brightnessK
 
         # 밝기 필터 디버그 오버레이: 통과(녹)·제거(적) 마스크와 Otsu 배수 표시
         int_h_viz, int_w_viz = arr_inputRoiBgr.shape[:2]
@@ -1653,7 +1653,7 @@ class Sam2AspectRatioService:
                 float_s = float(arr_scores[int_index])
                 float_confidence = None if math.isnan(float_s) else float_s
 
-            # 밝기 필터: 마스크 영역 평균 밝기가 Otsu×0.5 미만이면 배경으로 제거
+            # 밝기 필터: 마스크 영역 평균 밝기가 Otsu×k 미만이면 배경으로 제거
             arr_mask_bool = arr_mask.astype(bool)
             if arr_mask_bool.any():
                 float_mean_brightness = float(arr_gray_roi[arr_mask_bool].mean())
