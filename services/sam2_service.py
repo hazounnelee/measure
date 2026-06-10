@@ -1611,18 +1611,18 @@ class Sam2AspectRatioService:
                         ).astype(arr_masks[int_i].dtype)
             arr_masks = arr_masks_punched
 
-        # 겹침 영역 상호 배제: 겹치는 픽셀을 큰 마스크에서 제거 (작은 마스크 우선)
+        # 겹침 영역 상호 배제: 두 마스크가 겹치면 교집합을 양쪽 모두에서 제거
         if len(arr_masks) > 1:
-            arr_areas = np.array([m.sum() for m in arr_masks], dtype=np.int64)
-            arr_order = np.argsort(arr_areas)
-            arr_occupied = np.zeros(arr_masks[0].shape, dtype=bool)
-            list_exclusive = [None] * len(arr_masks)
-            for idx in arr_order:
-                arr_m = arr_masks[idx].astype(bool)
-                arr_m_excl = arr_m & ~arr_occupied
-                list_exclusive[idx] = arr_m_excl.astype(arr_masks[idx].dtype)
-                arr_occupied |= arr_m
-            arr_masks = list_exclusive
+            int_n_masks = len(arr_masks)
+            arr_overlap_count = np.zeros(arr_masks[0].shape, dtype=np.int32)
+            for arr_m in arr_masks:
+                arr_overlap_count += (arr_m > 0).astype(np.int32)
+            arr_shared = arr_overlap_count >= 2
+            if arr_shared.any():
+                arr_masks = [
+                    (arr_m.astype(bool) & ~arr_shared).astype(arr_m.dtype)
+                    for arr_m in arr_masks
+                ]
 
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
