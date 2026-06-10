@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 
 
@@ -71,6 +72,7 @@ def save_particle_distribution_histogram(
             obj_ax.hist(arr_v, bins=30, alpha=0.65, color="#5588ff",
                         edgecolor="#333333", linewidth=0.8, **dict_range)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#5588ff")
+            obj_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
         obj_fig.tight_layout()
@@ -103,6 +105,7 @@ def save_sphericity_distribution_histogram(
             obj_ax.hist(arr_v, bins=30, alpha=0.65, color="#44cc44",
                         edgecolor="#333333", linewidth=0.8, **dict_range)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#44cc44")
+            obj_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
         obj_fig.tight_layout()
@@ -160,6 +163,7 @@ def _draw_quartile_hist(
             fontsize=7.5, va="top", ha="left", linespacing=1.2,
         )
 
+    obj_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
 
@@ -546,6 +550,7 @@ def save_lot_particle_scatter_histogram(
                             color="#888888", linewidth=1.0, linestyle=":")
         obj_ax_hist.axvline(float_mean_all + 1.96 * float_std_all,
                             color="#888888", linewidth=1.0, linestyle=":")
+        obj_ax_hist.yaxis.set_major_locator(MaxNLocator(integer=True))
         obj_ax_hist.grid(axis="y", linestyle="--", alpha=0.3)
         obj_ax_hist.tick_params(labelbottom=False)
 
