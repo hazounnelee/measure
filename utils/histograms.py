@@ -62,10 +62,14 @@ def save_particle_distribution_histogram(
 
         if list_sizes:
             arr_v = np.array(list_sizes, dtype=np.float32)
-            int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 20))
             float_mean = float(np.mean(arr_v))
-            obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color="#5588ff",
-                        edgecolor="#333333", linewidth=0.8)
+            float_xmin, float_xmax = _std_xlim(list_sizes)
+            dict_range = {}
+            if float_xmin is not None and float_xmax is not None:
+                obj_ax.set_xlim(float_xmin, float_xmax)
+                dict_range["range"] = (float_xmin, float_xmax)
+            obj_ax.hist(arr_v, bins=30, alpha=0.65, color="#5588ff",
+                        edgecolor="#333333", linewidth=0.8, **dict_range)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#5588ff")
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
@@ -90,12 +94,15 @@ def save_sphericity_distribution_histogram(
 
         if list_sphs:
             arr_v = np.array(list_sphs, dtype=np.float32)
-            int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 20))
             float_mean = float(np.mean(arr_v))
-            obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color="#44cc44",
-                        edgecolor="#333333", linewidth=0.8)
+            float_xmin, float_xmax = _std_xlim(list_sphs, float_hard_max=1.0)
+            dict_range = {}
+            if float_xmin is not None and float_xmax is not None:
+                obj_ax.set_xlim(float_xmin, float_xmax)
+                dict_range["range"] = (float_xmin, float_xmax)
+            obj_ax.hist(arr_v, bins=30, alpha=0.65, color="#44cc44",
+                        edgecolor="#333333", linewidth=0.8, **dict_range)
             obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color="#44cc44")
-            obj_ax.set_xlim(0, 0.99)
             obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
 
         obj_fig.tight_layout()
@@ -113,12 +120,13 @@ def _draw_quartile_hist(
     str_unit: str,
     float_xlim_min: tp.Optional[float],
     float_xlim_max: tp.Optional[float],
-    int_bins_factor: int = 1,
 ) -> None:
     """Draw a histogram with Q1/Q2/Q3 markers and IQR shading on an existing Axes."""
-    int_bins = int(np.clip(np.sqrt(len(arr_v)) * int_bins_factor, 5 * int_bins_factor, 150))
-    obj_ax.hist(arr_v, bins=int_bins, alpha=0.65, color=str_color,
-                edgecolor="#333333", linewidth=0.8)
+    dict_range = {}
+    if float_xlim_min is not None and float_xlim_max is not None:
+        dict_range["range"] = (float_xlim_min, float_xlim_max)
+    obj_ax.hist(arr_v, bins=30, alpha=0.65, color=str_color,
+                edgecolor="#333333", linewidth=0.8, **dict_range)
 
     float_q1   = float(np.percentile(arr_v, 25))
     float_q2   = float(np.median(arr_v))
@@ -164,7 +172,6 @@ def _save_batch_hist(
     str_unit: str = "",
     float_xlim_min: tp.Optional[float] = None,
     float_xlim_max: tp.Optional[float] = None,
-    int_bins_factor: int = 1,
     float_vline_ref: tp.Optional[float] = None,
 ) -> None:
     obj_fig = Figure(figsize=(10, 6), dpi=100)
@@ -175,7 +182,7 @@ def _save_batch_hist(
         if list_vals:
             arr_v = np.array(list_vals, dtype=np.float64)
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
-                                float_xlim_min, float_xlim_max, int_bins_factor)
+                                float_xlim_min, float_xlim_max)
             if float_vline_ref is not None:
                 xl, xr = obj_ax.get_xlim()
                 if xl <= float_vline_ref <= xr:
@@ -284,7 +291,6 @@ def save_secondary_batch_histograms(
         str_color="#5588ff",
         str_unit=" µm",
         float_xlim_min=float_size_xmin, float_xlim_max=float_size_xmax,
-        int_bins_factor=5,
     )
     _save_batch_hist(
         list_vals=list_size_per_image,
@@ -294,7 +300,6 @@ def save_secondary_batch_histograms(
         str_color="#3366cc",
         str_unit=" µm",
         float_xlim_min=float_size_pi_xmin, float_xlim_max=float_size_pi_xmax,
-        int_bins_factor=3,
     )
     _save_batch_hist(
         list_vals=list_size_stds,
@@ -304,7 +309,6 @@ def save_secondary_batch_histograms(
         str_color="#2266cc",
         str_unit=" µm",
         float_xlim_min=float_size_std_xmin, float_xlim_max=float_size_std_xmax,
-        int_bins_factor=2,
     )
     if float_size_ref is not None and list_size_rmsds:
         float_rmsd_xmin, float_rmsd_xmax = _std_xlim(list_size_rmsds, float_hard_min=0.0)
@@ -316,7 +320,6 @@ def save_secondary_batch_histograms(
             str_color="#e06010",
             str_unit=" µm",
             float_xlim_min=float_rmsd_xmin, float_xlim_max=float_rmsd_xmax,
-            int_bins_factor=2,
         )
     _save_batch_hist(
         list_vals=list_sphs,
@@ -367,26 +370,15 @@ def save_secondary_batch_histograms(
 
 def _std_xlim(
     list_vals: tp.List[float],
-    float_z: float = 1.96,
     float_hard_min: tp.Optional[float] = None,
     float_hard_max: tp.Optional[float] = None,
 ) -> tp.Tuple[tp.Optional[float], tp.Optional[float]]:
-    """Return (xmin, xmax) clipped to actual data range (no empty-space expansion).
-
-    Computes mean ± z*std then clips to [data_min, data_max] so the axis
-    never extends into a region with no data. Hard limits further constrain
-    the result when provided.
-    """
+    """Return (xmin, xmax) as the minimum interval containing 95% of data."""
     if len(list_vals) < 4:
         return float_hard_min, float_hard_max
     arr = np.array(list_vals, dtype=np.float64)
-    float_mean = float(np.mean(arr))
-    float_std  = float(np.std(arr))
-    float_data_min = float(arr.min())
-    float_data_max = float(arr.max())
-    # clip computed range to actual data extent (no empty-space padding)
-    float_xmin = max(float_mean - float_z * float_std, float_data_min)
-    float_xmax = min(float_mean + float_z * float_std, float_data_max)
+    float_xmin = float(np.percentile(arr, 2.5))
+    float_xmax = float(np.percentile(arr, 97.5))
     if float_hard_min is not None:
         float_xmin = max(float_xmin, float_hard_min)
     if float_hard_max is not None:
@@ -536,15 +528,13 @@ def save_lot_particle_scatter_histogram(
         obj_ax_hist.tick_params(labelsize=10)
         obj_ax_hist.set_xlim(float_xmin, float_xmax)
 
-        int_bins = int(np.clip(np.sqrt(len(list_all)), 8, 40))
-
         for list_vals, str_color in [
             (list_particle_sizes, "#5588ff"),
             (list_fragment_sizes, "#ff6622"),
         ]:
             if list_vals:
                 obj_ax_hist.hist(
-                    list_vals, bins=int_bins, alpha=0.55, color=str_color,
+                    list_vals, bins=30, alpha=0.55, color=str_color,
                     edgecolor="#333333", linewidth=0.6,
                     range=(float_xmin, float_xmax),
                 )
