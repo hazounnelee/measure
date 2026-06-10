@@ -653,6 +653,34 @@ class PrimaryParticleService(Sam2AspectRatioService):
     # 시각화
     # ----------------------------------------------------------
 
+    def _create_primary_mask_overlay(
+        self,
+        arr_imageBgr: np.ndarray,
+        list_objects: tp.List[PrimaryParticleMeasurement],
+        list_masks: tp.List[np.ndarray],
+    ) -> np.ndarray:
+        """초록색 마스크 + 컨투어 overlay (라벨 없음)."""
+        tpl_fill = (60, 220, 60)
+        tpl_edge = (0, 255, 0)
+
+        int_h, int_w = arr_imageBgr.shape[:2]
+        arr_overlay = cv2.resize(arr_imageBgr, (int_w * 2, int_h * 2), interpolation=cv2.INTER_LINEAR)
+
+        for obj_m, arr_mask in zip(list_objects, list_masks):
+            arr_mask2 = cv2.resize(arr_mask, (int_w * 2, int_h * 2), interpolation=cv2.INTER_NEAREST)
+            arr_overlay[arr_mask2 > 0] = (
+                arr_overlay[arr_mask2 > 0].astype(np.float32) * 0.5
+                + np.array(tpl_fill, dtype=np.float32) * 0.5
+            ).astype(np.uint8)
+
+        for obj_m, arr_mask in zip(list_objects, list_masks):
+            arr_contour = self.extract_largest_contour(arr_mask)
+            if arr_contour is None:
+                continue
+            cv2.drawContours(arr_overlay, [(arr_contour * 2).astype(np.int32)], -1, tpl_edge, 1)
+
+        return arr_overlay
+
     def create_primary_overlay(
         self,
         arr_imageBgr: np.ndarray,
@@ -660,49 +688,27 @@ class PrimaryParticleService(Sam2AspectRatioService):
         list_masks: tp.List[np.ndarray],
         float_density: tp.Optional[float] = None,
     ) -> np.ndarray:
-        """침상(파랑)/판상(초록)/fragment(주황) 색으로 overlay를 생성한다."""
-        # BGR 색상 (mask fill / contour+label)
-        dict_fill = {
-            "acicular": (230, 80,  80),
-            "plate":    (60,  220, 60),
-            "fragment": (0,   165, 255),
-        }
-        dict_edge = {
-            "acicular": (180, 40,  40),
-            "plate":    (0,   180, 0),
-            "fragment": (0,   120, 200),
-        }
-
-        int_h, int_w = arr_imageBgr.shape[:2]
-        arr_overlay = cv2.resize(arr_imageBgr, (int_w * 2, int_h * 2), interpolation=cv2.INTER_LINEAR)
-
-        for obj_m, arr_mask in zip(list_objects, list_masks):
-            arr_mask2 = cv2.resize(arr_mask, (int_w * 2, int_h * 2), interpolation=cv2.INTER_NEAREST)
-            tpl_c = dict_fill.get(obj_m.str_category, (128, 128, 128))
-            arr_overlay[arr_mask2 > 0] = (
-                arr_overlay[arr_mask2 > 0].astype(np.float32) * 0.5
-                + np.array(tpl_c, dtype=np.float32) * 0.5
-            ).astype(np.uint8)
+        """초록색 마스크 overlay + 라벨 + 하단 통계 바."""
+        tpl_label = (255, 255, 255)
+        arr_overlay = self._create_primary_mask_overlay(arr_imageBgr, list_objects, list_masks)
 
         list_placedRects: tp.List[tp.Tuple[int, int, int, int]] = []
         for obj_m, arr_mask in zip(list_objects, list_masks):
+            if obj_m.str_category not in ("acicular", "plate"):
+                continue
             arr_contour = self.extract_largest_contour(arr_mask)
             if arr_contour is None:
                 continue
-            arr_contour2 = (arr_contour * 2).astype(np.int32)
-            tpl_ec = dict_edge.get(obj_m.str_category, (128, 128, 128))
-            cv2.drawContours(arr_overlay, [arr_contour2], -1, tpl_ec, 1)
-
-            if obj_m.str_category in ("acicular", "plate"):
-                int_cx2 = int(round(obj_m.float_centroidX * 2))
-                int_cy2 = int(round(obj_m.float_centroidY * 2))
-                draw_label_no_overlap(
-                    arr_overlay,
-                    [f"{obj_m.float_thicknessUm:.2f}um"],
-                    int_cx2, int_cy2,
-                    tpl_ec,
-                    list_placedRects,
-                )
+            int_cx2 = int(round(obj_m.float_centroidX * 2))
+            int_cy2 = int(round(obj_m.float_centroidY * 2))
+            draw_label_no_overlap(
+                arr_overlay,
+                [f"{obj_m.float_thicknessUm:.2f}um"],
+                int_cx2, int_cy2,
+                tpl_label,
+                list_placedRects,
+                float_fontScale=0.55,
+            )
 
         # --- 하단 통계 바 ---
         list_t = [o.float_thicknessUm for o in list_objects if o.str_category in ("acicular", "plate")]
@@ -901,9 +907,12 @@ class PrimaryParticleService(Sam2AspectRatioService):
             (255, 255, 0), 2,
         )
 
+        arr_overlayMask = self._create_primary_mask_overlay(arr_inputRoiBgr, list_objects, list_masks)
+
         cv2.imwrite(str(self.obj_config.path_outputDir / "01_input.png"), arr_inputBgr)
         cv2.imwrite(str(self.obj_config.path_outputDir / "02_input_roi.png"), arr_inputRoiBgr)
         cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi.png"), arr_overlayRoi)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "03_overlay_roi_mask.png"), arr_overlayMask)
         cv2.imwrite(str(self.obj_config.path_outputDir / "04_overlay_full.png"), arr_overlayFull)
 
         # OpenCV/LSD debug image

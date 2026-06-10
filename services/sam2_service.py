@@ -1274,6 +1274,7 @@ class Sam2AspectRatioService:
 
         arr_overlay_with_stats = self._append_stats_bar(arr_overlayRoi, dict_summary)
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi.png"), arr_overlay_with_stats)
+        cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_roi_clean.png"), arr_overlayRoi)
 
         with (self.obj_config.path_outputDir / "summary.json").open("w", encoding="utf-8") as obj_f:
             json_dump_safe(dict_summary, obj_f)
