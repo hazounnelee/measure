@@ -95,7 +95,7 @@ def save_sphericity_distribution_histogram(
         if list_sphs:
             arr_v = np.array(list_sphs, dtype=np.float32)
             float_mean = float(np.mean(arr_v))
-            float_xmin, float_xmax = _std_xlim(list_sphs, float_hard_max=1.0)
+            float_xmin, float_xmax = _std_xlim(list_sphs)
             dict_range = {}
             if float_xmin is not None and float_xmax is not None:
                 obj_ax.set_xlim(float_xmin, float_xmax)
@@ -275,13 +275,13 @@ def save_secondary_batch_histograms(
             if fv is not None: list_fine.append(fv)
 
     float_size_xmin,     float_size_xmax     = _std_xlim(list_sizes)
-    float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs,       float_hard_max=1.0)
-    float_sph_p_xmin,    float_sph_p_xmax    = _std_xlim(list_sphs_prime, float_hard_max=1.0)
+    float_sph_xmin,      float_sph_xmax      = _std_xlim(list_sphs)
+    float_sph_p_xmin,    float_sph_p_xmax    = _std_xlim(list_sphs_prime)
     float_fine_xmin,     float_fine_xmax     = _std_xlim(list_fine)
     float_size_std_xmin, float_size_std_xmax = _std_xlim(list_size_stds)
     float_size_pi_xmin,  float_size_pi_xmax  = _std_xlim(list_size_per_image)
-    float_sph_pi_xmin,   float_sph_pi_xmax   = _std_xlim(list_sph_per_image,       float_hard_max=1.0)
-    float_sph_p_pi_xmin, float_sph_p_pi_xmax = _std_xlim(list_sph_prime_per_image, float_hard_max=1.0)
+    float_sph_pi_xmin,   float_sph_pi_xmax   = _std_xlim(list_sph_per_image)
+    float_sph_p_pi_xmin, float_sph_p_pi_xmax = _std_xlim(list_sph_prime_per_image)
 
     _save_batch_hist(
         list_vals=list_sizes,
