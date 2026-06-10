@@ -429,15 +429,10 @@ class Sam2AspectRatioService:
             for list_batch in list_promptBatches:
                 try:
                     if self.obj_config.bool_usePointPrompts:
-                        list_pts = [[int(px), int(py)] for px, py in list_batch]
-                        list_lbls = [1] * len(list_batch)
-                        if list_negPoints:
-                            list_pts += [[int(px), int(py)] for px, py in list_negPoints]
-                            list_lbls += [0] * len(list_negPoints)
                         list_results = self.obj_model(  # type: ignore[misc]
                             source=arr_tileBgr,
-                            points=list_pts,
-                            labels=list_lbls,
+                            points=[[int(px), int(py)] for px, py in list_batch],
+                            labels=[1] * len(list_batch),
                             **dict_predictCommon,
                         )
                     else:
@@ -464,6 +459,16 @@ class Sam2AspectRatioService:
                     arr_tileMask = (
                         arr_tm > self.obj_config.float_maskBinarizeThreshold).astype(np.uint8)
                     if int(arr_tileMask.sum()) < self.obj_config.int_minValidMaskArea:
+                        continue
+
+                    # NPP 필터: negative point가 마스크 내에 있으면 제거
+                    bool_hasNeg = False
+                    for int_nx, int_ny in list_negPoints:
+                        if 0 <= int_ny < arr_tileMask.shape[0] and 0 <= int_nx < arr_tileMask.shape[1]:
+                            if arr_tileMask[int_ny, int_nx] > 0:
+                                bool_hasNeg = True
+                                break
+                    if bool_hasNeg:
                         continue
 
                     arr_tileContour = self.extract_largest_contour(
