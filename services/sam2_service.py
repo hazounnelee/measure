@@ -429,10 +429,15 @@ class Sam2AspectRatioService:
             for list_batch in list_promptBatches:
                 try:
                     if self.obj_config.bool_usePointPrompts:
+                        list_pts = [[int(px), int(py)] for px, py in list_batch]
+                        list_lbls = [1] * len(list_batch)
+                        if list_negPoints:
+                            list_pts += [[int(px), int(py)] for px, py in list_negPoints]
+                            list_lbls += [0] * len(list_negPoints)
                         list_results = self.obj_model(  # type: ignore[misc]
                             source=arr_tileBgr,
-                            points=[[int(px), int(py)] for px, py in list_batch],
-                            labels=[1] * len(list_batch),
+                            points=list_pts,
+                            labels=list_lbls,
                             **dict_predictCommon,
                         )
                     else:
@@ -1605,6 +1610,19 @@ class Sam2AspectRatioService:
                             & ~arr_masks[int_j].astype(bool)
                         ).astype(arr_masks[int_i].dtype)
             arr_masks = arr_masks_punched
+
+        # 겹침 영역 상호 배제: 겹치는 픽셀을 큰 마스크에서 제거 (작은 마스크 우선)
+        if len(arr_masks) > 1:
+            arr_areas = np.array([m.sum() for m in arr_masks], dtype=np.int64)
+            arr_order = np.argsort(arr_areas)
+            arr_occupied = np.zeros(arr_masks[0].shape, dtype=bool)
+            list_exclusive = [None] * len(arr_masks)
+            for idx in arr_order:
+                arr_m = arr_masks[idx].astype(bool)
+                arr_m_excl = arr_m & ~arr_occupied
+                list_exclusive[idx] = arr_m_excl.astype(arr_masks[idx].dtype)
+                arr_occupied |= arr_m
+            arr_masks = list_exclusive
 
         list_objects: tp.List[ObjectMeasurement] = []
         list_validMasks: tp.List[np.ndarray] = []
