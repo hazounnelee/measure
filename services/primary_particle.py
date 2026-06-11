@@ -818,8 +818,8 @@ class PrimaryParticleService(Sam2AspectRatioService):
         path_output: Path,
     ) -> None:
         """침상/판상별 두께 분포 histogram 을 PNG로 저장한다."""
-        list_ac = [o.float_thicknessUm for o in list_objects if o.str_category == "acicular"]
-        list_pl = [o.float_thicknessUm for o in list_objects if o.str_category == "plate"]
+        list_ac = [round(o.float_thicknessUm, 3) for o in list_objects if o.str_category == "acicular"]
+        list_pl = [round(o.float_thicknessUm, 3) for o in list_objects if o.str_category == "plate"]
 
         str_lot = self.obj_config.path_input.resolve().parent.name or "UnknownLot"
         obj_fig = Figure(figsize=(10, 6), dpi=100)

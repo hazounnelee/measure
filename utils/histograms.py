@@ -123,6 +123,7 @@ def _draw_quartile_hist(
     str_unit: str,
     float_xlim_min: tp.Optional[float],
     float_xlim_max: tp.Optional[float],
+    str_fmt: str = ".2f",
 ) -> None:
     """Draw a histogram with Q1/Q2/Q3 markers and IQR shading on an existing Axes."""
     dict_range = {}
@@ -158,7 +159,7 @@ def _draw_quartile_hist(
         obj_ax.axvline(float_val, linestyle=str_ls, linewidth=1.6, color=str_lc)
         obj_ax.text(
             float_val, float_y,
-            f"{str_lbl}\n{float_val:.2f}{str_unit}",
+            f"{str_lbl}\n{float_val:{str_fmt}}{str_unit}",
             transform=_xform, color=str_lc,
             fontsize=7.5, va="top", ha="left", linespacing=1.2,
         )
@@ -177,6 +178,7 @@ def _save_batch_hist(
     float_xlim_min: tp.Optional[float] = None,
     float_xlim_max: tp.Optional[float] = None,
     float_vline_ref: tp.Optional[float] = None,
+    str_fmt: str = ".2f",
 ) -> None:
     obj_fig = Figure(figsize=(10, 6), dpi=100)
     obj_ax = obj_fig.add_subplot(111)
@@ -186,7 +188,7 @@ def _save_batch_hist(
         if list_vals:
             arr_v = np.array(list_vals, dtype=np.float64)
             _draw_quartile_hist(obj_ax, arr_v, str_color, str_unit,
-                                float_xlim_min, float_xlim_max)
+                                float_xlim_min, float_xlim_max, str_fmt=str_fmt)
             if float_vline_ref is not None:
                 xl, xr = obj_ax.get_xlim()
                 if xl <= float_vline_ref <= xr:
@@ -409,7 +411,7 @@ def save_primary_batch_histograms(
     list_thickness: tp.List[float] = []
     for v in (dict_batchSummary.get("all_primary_thickness_um_raw") or []):
         try:
-            fv = float(v)
+            fv = round(float(v), 3)
             if not math.isnan(fv):
                 list_thickness.append(fv)
         except (TypeError, ValueError):
@@ -423,7 +425,7 @@ def save_primary_batch_histograms(
                 v = dict_th.get("mean")
                 if v is not None:
                     try:
-                        fv = float(v)
+                        fv = round(float(v), 3)
                         if not math.isnan(fv):
                             list_thickness_per_image.append(fv)
                     except (TypeError, ValueError):
@@ -457,6 +459,7 @@ def save_primary_batch_histograms(
         str_xlabel="Thickness (µm)",
         str_color="#9944ee",
         str_unit=" µm",
+        str_fmt=".3f",
         **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_thickness)))),
     )
     _save_batch_hist(
@@ -466,6 +469,7 @@ def save_primary_batch_histograms(
         str_xlabel="Mean Thickness (µm)",
         str_color="#7722bb",
         str_unit=" µm",
+        str_fmt=".3f",
         **(dict(zip(("float_xlim_min", "float_xlim_max"), _std_xlim(list_thickness_per_image)))),
     )
     _save_batch_hist(
