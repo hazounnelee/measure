@@ -377,12 +377,17 @@ def _std_xlim(
     float_hard_min: tp.Optional[float] = None,
     float_hard_max: tp.Optional[float] = None,
 ) -> tp.Tuple[tp.Optional[float], tp.Optional[float]]:
-    """Return (xmin, xmax) as the minimum interval containing 95% of data."""
+    """Return (xmin, xmax) as the minimum interval containing 95% of data.
+    30개 미만이면 전체 데이터 범위를 반환한다."""
     if len(list_vals) < 4:
         return float_hard_min, float_hard_max
     arr = np.array(list_vals, dtype=np.float64)
-    float_xmin = float(np.percentile(arr, 2.5))
-    float_xmax = float(np.percentile(arr, 97.5))
+    if len(list_vals) < 30:
+        float_xmin = float(arr.min())
+        float_xmax = float(arr.max())
+    else:
+        float_xmin = float(np.percentile(arr, 2.5))
+        float_xmax = float(np.percentile(arr, 97.5))
     if float_hard_min is not None:
         float_xmin = max(float_xmin, float_hard_min)
     if float_hard_max is not None:

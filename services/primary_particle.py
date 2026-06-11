@@ -842,8 +842,12 @@ class PrimaryParticleService(Sam2AspectRatioService):
                     float_mean = float(np.mean(arr_v))
                     dict_range = {}
                     if len(list_vals) >= 4:
-                        float_xmin = float(np.percentile(arr_v, 2.5))
-                        float_xmax = float(np.percentile(arr_v, 97.5))
+                        if len(list_vals) < 30:
+                            float_xmin = float(arr_v.min())
+                            float_xmax = float(arr_v.max())
+                        else:
+                            float_xmin = float(np.percentile(arr_v, 2.5))
+                            float_xmax = float(np.percentile(arr_v, 97.5))
                         obj_ax.set_xlim(float_xmin, float_xmax)
                         dict_range["range"] = (float_xmin, float_xmax)
                     obj_ax.hist(
