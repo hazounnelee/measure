@@ -27,7 +27,7 @@ from core.schema import (
 )
 from utils.metrics import convert_pixels_to_micrometers, calculate_mean_from_optional_values, calculate_percentage, json_dump_safe, pooled_stats
 from utils.histograms import save_primary_batch_histograms
-from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap
+from utils.image import detect_sphere_roi, compute_center_roi, compute_adaptive_block_size, draw_label_no_overlap, create_stats_bar
 from utils.lsd import detect_acicular_lsd
 from utils.contour import fuse_contours
 from utils.io import collect_input_groups, build_image_output_dir
@@ -704,7 +704,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             int_cy2 = int(round(obj_m.float_centroidY * 2))
             draw_label_no_overlap(
                 arr_overlay,
-                [f"{obj_m.float_thicknessUm:.2f}um"],
+                [f"{obj_m.float_thicknessUm:.2f}µm"],
                 int_cx2, int_cy2,
                 tpl_label,
                 list_placedRects,
@@ -717,9 +717,9 @@ class PrimaryParticleService(Sam2AspectRatioService):
         if list_t:
             str_stats = (
                 f"N={int_count}"
-                f"  mean={np.mean(list_t):.3f}um"
-                f"  median={float(np.median(list_t)):.3f}um"
-                f"  std={float(np.std(list_t)):.3f}um"
+                f"  mean={np.mean(list_t):.3f}µm"
+                f"  median={float(np.median(list_t)):.3f}µm"
+                f"  std={float(np.std(list_t)):.3f}µm"
             )
         else:
             str_stats = f"N={int_count}"
@@ -728,14 +728,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
         int_ow = arr_overlay.shape[1]
         float_scale = int_ow / 1800.0
-        int_font = cv2.FONT_HERSHEY_SIMPLEX
-        int_thickness_txt = max(1, int(round(float_scale * 1.5)))
-        (int_tw, int_th), int_bl = cv2.getTextSize(str_stats, int_font, float_scale, int_thickness_txt)
-        int_bar_h = int_th + int_bl + int(16 * float_scale)
-        arr_bar = np.zeros((int_bar_h, int_ow, 3), dtype=np.uint8)
-        int_ty = int_th + int(8 * float_scale)
-        cv2.putText(arr_bar, str_stats, (int(8 * float_scale), int_ty),
-                    int_font, float_scale, (220, 220, 220), int_thickness_txt, cv2.LINE_AA)
+        arr_bar = create_stats_bar(str_stats, int_ow, float_scale)
         arr_overlay = np.vstack([arr_overlay, arr_bar])
 
         return arr_overlay

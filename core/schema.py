@@ -44,6 +44,8 @@ class Sam2AspectRatioConfig:
     bool_useEqDiameter: bool = True
     float_brightnessK: float = 0.5
     float_punchOverlapThresh: float = 0.97
+    bool_convexMasks: bool = False
+    bool_restoreMasks: bool = False
     bool_debug: bool = False
 
 

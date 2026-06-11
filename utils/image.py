@@ -2,6 +2,48 @@ from __future__ import annotations
 import typing as tp
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+
+# ── PIL 유니코드 폰트 (µ 등 지원) ─────────────────────────────────────────────
+_PIL_FONT_CACHE: tp.Dict[int, ImageFont.FreeTypeFont] = {}
+
+
+def _get_pil_font(int_size: int) -> ImageFont.FreeTypeFont:
+    if int_size in _PIL_FONT_CACHE:
+        return _PIL_FONT_CACHE[int_size]
+    for str_path in [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    ]:
+        try:
+            obj_font = ImageFont.truetype(str_path, int_size)
+            _PIL_FONT_CACHE[int_size] = obj_font
+            return obj_font
+        except (IOError, OSError):
+            continue
+    obj_font = ImageFont.load_default()
+    _PIL_FONT_CACHE[int_size] = obj_font
+    return obj_font
+
+
+def create_stats_bar(str_text: str, int_width: int, float_fontScale: float = 1.0) -> np.ndarray:
+    """µ 지원 PIL 기반 통계 바 생성 (검정 배경 + 밝은 회색 텍스트)."""
+    int_fontSize = max(12, int(float_fontScale * 22))
+    obj_font = _get_pil_font(int_fontSize)
+    bbox = obj_font.getbbox(str_text)
+    int_textH = bbox[3] - bbox[1]
+    int_padY = max(4, int(8 * float_fontScale))
+    int_barH = int_textH + int_padY * 2
+
+    pil_bar = Image.new("RGB", (int_width, int_barH), (0, 0, 0))
+    obj_draw = ImageDraw.Draw(pil_bar)
+    obj_draw.text((max(4, int(8 * float_fontScale)), int_padY), str_text,
+                  font=obj_font, fill=(220, 220, 220))
+    return cv2.cvtColor(np.array(pil_bar), cv2.COLOR_RGB2BGR)
 
 
 def draw_label_no_overlap(
@@ -15,15 +57,17 @@ def draw_label_no_overlap(
 ) -> None:
     """Draw a multi-line label near anchor without overlapping already-placed labels.
 
-    Tries 8 candidate positions around the anchor. Draws a dark outline under the
-    colored text for readability. Appends the placed rect to list_placedRects.
+    Uses PIL for rendering so Unicode characters (µ etc.) display correctly.
+    White text with black outline for readability.
     """
-    int_font = cv2.FONT_HERSHEY_SIMPLEX
+    int_fontSize = max(10, int(float_fontScale * 26))
+    obj_font = _get_pil_font(int_fontSize)
+
     int_lineH, int_maxW = 0, 0
     for str_line in list_lines:
-        (int_tw, int_th), int_bl = cv2.getTextSize(str_line, int_font, float_fontScale, 1)
-        int_maxW = max(int_maxW, int_tw)
-        int_lineH = max(int_lineH, int_th + int_bl)
+        bbox = obj_font.getbbox(str_line)
+        int_maxW = max(int_maxW, bbox[2] - bbox[0] + 6)
+        int_lineH = max(int_lineH, bbox[3] - bbox[1] + 4)
 
     int_gap = 2
     int_totalH = int_lineH * len(list_lines) + int_gap * (len(list_lines) - 1)
@@ -60,12 +104,25 @@ def draw_label_no_overlap(
     int_ty = int(np.clip(int_ty, 0, max(0, int_imgH - int_totalH)))
     list_placedRects.append((int_tx, int_ty, int_tx + int_maxW, int_ty + int_totalH))
 
+    int_stroke = max(1, int(float_fontScale * 4))
+    int_rx1 = max(0, int_tx - int_stroke - 1)
+    int_ry1 = max(0, int_ty - int_stroke - 1)
+    int_rx2 = min(int_imgW, int_tx + int_maxW + int_stroke + 1)
+    int_ry2 = min(int_imgH, int_ty + int_totalH + int_stroke + 1)
+
+    arr_region = arr_img[int_ry1:int_ry2, int_rx1:int_rx2].copy()
+    pil_region = Image.fromarray(cv2.cvtColor(arr_region, cv2.COLOR_BGR2RGB))
+    obj_draw = ImageDraw.Draw(pil_region)
+    tpl_rgb = (tpl_color[2], tpl_color[1], tpl_color[0])
+
     for int_i, str_line in enumerate(list_lines):
-        int_y = int_ty + int_lineH * (int_i + 1) + int_gap * int_i
-        cv2.putText(arr_img, str_line, (int_tx, int_y), int_font,
-                    float_fontScale, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(arr_img, str_line, (int_tx, int_y), int_font,
-                    float_fontScale, tpl_color, 1, cv2.LINE_AA)
+        int_y = (int_ty - int_ry1) + (int_lineH + int_gap) * int_i
+        int_x = int_tx - int_rx1
+        obj_draw.text((int_x, int_y), str_line, font=obj_font,
+                      fill=tpl_rgb, stroke_width=int_stroke, stroke_fill=(0, 0, 0))
+
+    arr_img[int_ry1:int_ry2, int_rx1:int_rx2] = cv2.cvtColor(
+        np.array(pil_region), cv2.COLOR_RGB2BGR)
 
 
 def compute_adaptive_block_size(

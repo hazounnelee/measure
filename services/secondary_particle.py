@@ -244,6 +244,8 @@ def run_secondary_particle_analysis(
     int_numNegativePoints: int = 3,
     float_brightnessK: float = 0.5,
     float_punchOverlapThresh: float = 0.97,
+    bool_convexMasks: bool = False,
+    bool_restoreMasks: bool = False,
     bool_debug: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """Run secondary particle segmentation and measurement pipeline."""
@@ -298,6 +300,8 @@ def run_secondary_particle_analysis(
             int_numNegativePoints=int_numNegativePoints,
             float_brightnessK=float_brightnessK,
             float_punchOverlapThresh=float_punchOverlapThresh,
+            bool_convexMasks=bool_convexMasks,
+            bool_restoreMasks=bool_restoreMasks,
             bool_debug=bool_debug,
         )
 
@@ -535,6 +539,10 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             help="밝기 필터 k: Otsu×k 미만이면 배경으로 제거 (기본값: 0.5)")
     obj_parser.add_argument("--punch_overlap_thresh", type=float, default=0.97,
                             help="마스크 겹침 펀치 임계값: 작은 마스크가 이 비율 이상 포함되면 큰 마스크에서 제거 (기본값: 0.97)")
+    obj_parser.add_argument("--convex_masks", action="store_true", default=False,
+                            help="최종 마스크에 convex hull 적용 (기본값: 미적용)")
+    obj_parser.add_argument("--restore_masks", action="store_true", default=False,
+                            help="가림입자 복원 (circle fitting 기반, 기본값: 미적용)")
     obj_parser.add_argument("--debug", action="store_true", default=False,
                             help="디버그 이미지/파일 저장 (tiles, prompts, masks_raw, overlay, CSV, JSON 등).")
     return obj_parser

@@ -95,6 +95,8 @@ def main() -> None:
         int_numNegativePoints=obj_args.num_negative_points,
         float_brightnessK=obj_args.brightness_k,
         float_punchOverlapThresh=obj_args.punch_overlap_thresh,
+        bool_convexMasks=obj_args.convex_masks,
+        bool_restoreMasks=obj_args.restore_masks,
         bool_debug=obj_args.debug,
     )
 

@@ -13,7 +13,7 @@ import yaml
 
 from core.schema import Sam2AspectRatioConfig, ObjectMeasurement, Sam2AspectRatioResult
 from models import load_sam2_model
-from utils.image import draw_label_no_overlap, create_processing_tiles, find_dist_transform_peaks, detect_hct_prompts, sample_legacy_prompts
+from utils.image import draw_label_no_overlap, create_stats_bar, create_processing_tiles, find_dist_transform_peaks, detect_hct_prompts, sample_legacy_prompts
 from utils.metrics import convert_pixels_to_micrometers, calculate_percentage, json_dump_safe
 from utils.iou import calculate_binary_iou, calculate_box_iou
 from utils.io import iter_chunks
@@ -1031,7 +1031,7 @@ class Sam2AspectRatioService:
                     list_lines.append(f"S'={obj_measurement.float_sphericity_prime:.2f}")
                 if list_lines:
                     draw_label_no_overlap(
-                        arr_overlay, list_lines, int_cx2, int_cy2, tpl_color, list_placedRects)
+                        arr_overlay, list_lines, int_cx2, int_cy2, (255, 255, 255), list_placedRects)
 
         return arr_overlay
 
@@ -1220,13 +1220,7 @@ class Sam2AspectRatioService:
 
         int_ow = arr_img.shape[1]
         float_scale = int_ow / 1800.0
-        int_font = cv2.FONT_HERSHEY_SIMPLEX
-        int_thick = max(1, int(round(float_scale * 1.5)))
-        (_, int_th), int_bl = cv2.getTextSize(str_stats, int_font, float_scale, int_thick)
-        int_bar_h = int_th + int_bl + int(16 * float_scale)
-        arr_bar = np.zeros((int_bar_h, int_ow, 3), dtype=np.uint8)
-        cv2.putText(arr_bar, str_stats, (int(8 * float_scale), int_th + int(8 * float_scale)),
-                    int_font, float_scale, (220, 220, 220), int_thick, cv2.LINE_AA)
+        arr_bar = create_stats_bar(str_stats, int_ow, float_scale)
         return np.vstack([arr_img, arr_bar])
 
     def save_outputs(
@@ -1314,6 +1308,13 @@ class Sam2AspectRatioService:
                               (200, 200, 0), 1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
 
+            path_tilesDir = self.obj_config.path_outputDir / "debug_tiles"
+            path_tilesDir.mkdir(exist_ok=True)
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                arr_tile = arr_inputRoiBgr[int_ty1:int_ty2, int_tx1:int_tx2]
+                cv2.imwrite(str(path_tilesDir / f"tile_{dict_t['tile_index']:03d}.png"), arr_tile)
+
         # ── 프롬프트 계산 과정 디버그 이미지 (4장) ──────────────────────────
         list_hct_circles = dict_debug.get("hct_circles", [])
         list_all_pts = dict_debug.get("candidate_points", [])
@@ -1349,6 +1350,9 @@ class Sam2AspectRatioService:
         # 2. HCT points(기존=검정) + CC points(신규=빨강) + CC 컨투어 → Otsu 이진화
         if list_hct_pts or list_cc_pts:
             arr_v2 = arr_binary_bgr.copy()
+            for dict_c in list_hct_circles:
+                int_cx, int_cy = dict_c["center_roi"]
+                cv2.circle(arr_v2, (int_cx, int_cy), dict_c["radius"], (0, 0, 0), -1)
             if list_cc_contours:
                 cv2.drawContours(arr_v2, list_cc_contours, -1, (0, 180, 0), 1)
             for dict_pt in list_hct_pts:
@@ -1370,13 +1374,14 @@ class Sam2AspectRatioService:
                 cv2.circle(arr_v3, (int_px, int_py), 3, tpl_old, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_3_pos.png"), arr_v3)
 
-        # 4. positive(기존=검정) + negative(신규=빨강) → 반전 이진화
+        # 4. positive(회색=추출완료) + negative(신규=빨강) → 반전 이진화
+        tpl_done = (160, 160, 160)
         if list_pos_pts or list_neg_pts:
             arr_v4 = arr_binary_inv_bgr.copy()
             for dict_pt in list_pos_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_old, -1)
+                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_done, -1)
             for dict_pt in list_neg_pts:
                 int_px = int(dict_pt["point_xy_roi"][0])
                 int_py = int(dict_pt["point_xy_roi"][1])
@@ -1724,7 +1729,7 @@ class Sam2AspectRatioService:
                             or int_by + int_bh >= int_mask_h):
                         bool_has_line_cut = True
 
-            if float_solidity < 0.97 or bool_has_line_cut:
+            if self.obj_config.bool_restoreMasks and (float_solidity < 0.97 or bool_has_line_cut):
                 result = self._fit_particle_circle(arr_mask)
                 if result is not None:
                     float_cx, float_cy, float_r = result
@@ -1742,8 +1747,8 @@ class Sam2AspectRatioService:
                                int(round(float_r)), (0, 200, 255), 1)
                     arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
 
-            # 모든 마스크에 hull 적용 → hull 기준 면적으로 분류
-            arr_mask = self._hull_mask(arr_mask)
+            if self.obj_config.bool_convexMasks:
+                arr_mask = self._hull_mask(arr_mask)
 
             obj_measurement = self.measure_mask(
                 arr_mask, int_index=int_index, float_confidence=float_confidence,
