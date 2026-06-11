@@ -16,6 +16,7 @@ import cv2
 import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 
 from core.schema import (
@@ -837,13 +838,19 @@ class PrimaryParticleService(Sam2AspectRatioService):
             ]:
                 if list_vals:
                     bool_hasData = True
-                    arr_v = np.array(list_vals, dtype=np.float32)
-                    int_bins = int(np.clip(np.sqrt(len(arr_v)), 5, 20))
+                    arr_v = np.array(list_vals, dtype=np.float64)
                     float_mean = float(np.mean(arr_v))
+                    dict_range = {}
+                    if len(list_vals) >= 4:
+                        float_xmin = float(np.percentile(arr_v, 2.5))
+                        float_xmax = float(np.percentile(arr_v, 97.5))
+                        obj_ax.set_xlim(float_xmin, float_xmax)
+                        dict_range["range"] = (float_xmin, float_xmax)
                     obj_ax.hist(
-                        arr_v, bins=int_bins, alpha=0.65,
+                        arr_v, bins=30, alpha=0.65,
                         label=str_label, color=str_color,
                         edgecolor="#333333", linewidth=0.8,
+                        **dict_range,
                     )
                     obj_ax.axvline(float_mean, linestyle="--", linewidth=1.5, color=str_color)
                     list_pendingLabels.append((float_mean, str_label, str_color))
@@ -859,6 +866,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
 
             if bool_hasData:
                 obj_ax.legend(fontsize=12)
+                obj_ax.yaxis.set_major_locator(MaxNLocator(integer=True))
                 obj_ax.grid(axis="y", linestyle="--", alpha=0.3)
             else:
                 obj_ax.text(
