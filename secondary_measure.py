@@ -53,6 +53,17 @@ def main() -> None:
         print(f"[scale] {float_mag:.0f}x → scale_pixels={mag_to_scale_pixels(float_mag):.4f} px/µm", flush=True)
 
     obj_args = obj_parser.parse_args()
+
+    # area_threshold 자동 산출: (d0² × mag²) / 150000
+    float_area_threshold = obj_args.area_threshold
+    if float_area_threshold is None:
+        if float_mag is not None:
+            float_area_threshold = (obj_args.d0 ** 2 * float_mag ** 2) / 150000.0
+            print(f"[threshold] d0={obj_args.d0}, mag={float_mag:.0f}x "
+                  f"→ area_threshold={float_area_threshold:.1f}", flush=True)
+        else:
+            float_area_threshold = 1500.0
+
     float_start = time.perf_counter()
 
     dict_summary = run_secondary_particle_analysis(
@@ -67,7 +78,7 @@ def main() -> None:
         int_roiYMax=obj_args.roi_y_max,
         int_bboxEdgeMargin=obj_args.bbox_edge_margin,
         int_tileEdgeMargin=obj_args.tile_edge_margin,
-        float_particleAreaThreshold=obj_args.area_threshold,
+        float_particleAreaThreshold=float_area_threshold,
         float_maskBinarizeThreshold=obj_args.mask_binarize_threshold,
         int_minValidMaskArea=obj_args.min_valid_mask_area,
         int_maskMorphKernelSize=obj_args.mask_morph_kernel_size,

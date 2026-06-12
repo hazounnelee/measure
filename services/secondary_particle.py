@@ -483,8 +483,10 @@ def build_secondary_arg_parser() -> argparse.ArgumentParser:
                             help="ROI 경계 근처 bbox 제외 margin")
     obj_parser.add_argument("--tile_edge_margin", type=int, default=CONST_TILE_EDGE_MARGIN,
                             help="타일 경계 근처 bbox 제외 margin")
-    obj_parser.add_argument("--area_threshold", type=float, default=CONST_PARTICLE_AREA_THRESHOLD,
-                            help="particle / fragment 분류 면적 threshold")
+    obj_parser.add_argument("--area_threshold", type=float, default=None,
+                            help="particle / fragment 분류 면적 threshold (미지정 시 d0·배율로 자동 산출)")
+    obj_parser.add_argument("--d0", type=float, default=10.0,
+                            help="표준입도 (µm). area_threshold 자동 산출에 사용: (d0²×mag²)/150000 (기본값: 10)")
     obj_parser.add_argument("--mask_binarize_threshold", type=float,
                             default=CONST_MASK_BINARIZE_THRESHOLD)
     obj_parser.add_argument("--min_valid_mask_area", type=int, default=CONST_MIN_VALID_MASK_AREA)
