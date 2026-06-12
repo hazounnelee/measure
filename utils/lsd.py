@@ -118,7 +118,7 @@ def detect_acicular_lsd(
         arr_roi_gray: Grayscale ROI image.
         arr_roi_bgr: BGR ROI image (for debug visualization).
         float_acicular_threshold: AR < this -> acicular.
-        str_particle_type: "acicular" or "plate" (wrong-shape candidates are dropped).
+        str_particle_type: "acicular" (plate is not supported in LSD mode).
         float_scale_pixels: Scale bar length in pixels.
         float_scale_um: Scale bar length in micrometers.
         int_edge_margin: Pixels from ROI edge to discard.
@@ -268,9 +268,9 @@ def detect_acicular_lsd(
             return None
 
         float_ar = float_thickness / float_len
-        str_category = "acicular" if float_ar < float_acicular_threshold else "plate"
-        if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
+        if float_ar >= float_acicular_threshold:
             return None
+        str_category = "acicular"
 
         float_ux = (float_x2 - float_x1) / max(float_len, 1.0)
         float_uy = (float_y2 - float_y1) / max(float_len, 1.0)
@@ -342,7 +342,7 @@ def detect_acicular_lsd(
         obj_m, arr_mask = tpl_result
         list_objects.append(obj_m)
         list_masks.append(arr_mask)
-        tpl_color = (0, 255, 0) if obj_m.str_category == "acicular" else (0, 128, 255)
+        tpl_color = (0, 255, 0)
         # 직사각형 윤곽선 (두께 포함)
         float_angle_rad = np.radians(obj_m.float_minRectAngle)
         float_cos = np.cos(float_angle_rad)

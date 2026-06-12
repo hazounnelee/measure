@@ -192,9 +192,9 @@ def fuse_contours(
             float_thickness_new = float_short_rect
 
         float_ar = float_thickness_new / max(float_long, 1.0)
-        str_category = "acicular" if float_ar < float_acicular_threshold else "plate"
-        if str_particle_type in ("acicular", "plate") and str_category != str_particle_type:
+        if float_ar >= float_acicular_threshold:
             continue
+        str_category = "acicular"
 
         int_imgH, int_imgW = arr_merged.shape[:2]
         arr_rect_mask = np.zeros(arr_merged.shape, dtype=np.uint8)
