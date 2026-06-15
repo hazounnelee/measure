@@ -261,6 +261,83 @@ class Sam2AspectRatioService:
         }
         return arr_roiBgr, dict_roi
 
+    def _save_tile_prompt_debug_images(
+        self,
+        path_tileDebugDir: Path,
+        int_tileIdx: int,
+        arr_tileBgr: np.ndarray,
+        arr_tileGray: np.ndarray,
+        dict_hctInfo: tp.Dict[str, tp.Any],
+        list_posPoints: tp.List[tp.Tuple[int, int]],
+        list_negPoints: tp.List[tp.Tuple[int, int]],
+        int_numHctPos: int,
+    ) -> None:
+        """타일 단위로 독립 계산된 prompt 디버그 이미지를 저장한다.
+
+        ROI 전체 이미지를 crop하는 것이 아니라, 이 타일의 grayscale/HCT/CC
+        결과만 사용해 그 타일에서 실제로 처리된 내용을 그대로 보여준다.
+        """
+        tpl_ppp = (255, 0, 255)      # magenta: positive point prompt
+        tpl_npp = (0, 255, 0)        # green: negative point prompt
+        tpl_prev = (160, 160, 160)   # gray: 이전 단계 포인트
+        tpl_geom = (255, 0, 0)       # blue: 기하 피처 (원, 컨투어)
+
+        list_hct_circles = dict_hctInfo.get("hct_circles", [])
+        list_cc_contours = dict_hctInfo.get("cc_contours", [])
+        list_hct_pts = list_posPoints[:int_numHctPos]
+        list_cc_pts = list_posPoints[int_numHctPos:]
+
+        str_prefix = f"tile_{int_tileIdx:03d}"
+
+        # 1. HCT 원(blue) + HCT PPP(magenta) → 타일 원본
+        if list_hct_circles or list_hct_pts:
+            arr_v1 = arr_tileBgr.copy()
+            for (int_cx, int_cy, int_cr) in list_hct_circles:
+                cv2.circle(arr_v1, (int_cx, int_cy), int_cr, tpl_geom, 1)
+            for (int_px, int_py) in list_hct_pts:
+                cv2.circle(arr_v1, (int(int_px), int(int_py)), 3, tpl_ppp, -1)
+            cv2.imwrite(str(path_tileDebugDir / f"{str_prefix}_prompt_1_hct.png"), arr_v1)
+
+        # 2. CC 배경(HCT 제외 전경 마스크) + HCT PPP(gray) + CC 컨투어(blue) + CC PPP(magenta)
+        arr_blur = cv2.GaussianBlur(arr_tileGray, (5, 5), 0)
+        _, arr_binary = cv2.threshold(arr_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if list_hct_pts or list_cc_pts:
+            arr_k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            arr_fg = cv2.morphologyEx(arr_binary, cv2.MORPH_CLOSE, arr_k5, iterations=2)
+            arr_fg = cv2.morphologyEx(arr_fg, cv2.MORPH_OPEN, arr_k5, iterations=1)
+            arr_circles_mask = np.zeros_like(arr_binary)
+            for (int_cx, int_cy, int_cr) in list_hct_circles:
+                cv2.circle(arr_circles_mask, (int_cx, int_cy), int_cr, 255, -1)
+            arr_uncov = cv2.bitwise_and(arr_fg, cv2.bitwise_not(arr_circles_mask))
+            arr_k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            arr_uncov = cv2.morphologyEx(arr_uncov, cv2.MORPH_OPEN, arr_k3, iterations=1)
+            arr_v2 = cv2.cvtColor(arr_uncov, cv2.COLOR_GRAY2BGR)
+            if list_cc_contours:
+                cv2.drawContours(arr_v2, list_cc_contours, -1, tpl_geom, 1)
+            for (int_px, int_py) in list_hct_pts:
+                cv2.circle(arr_v2, (int(int_px), int(int_py)), 3, tpl_prev, -1)
+            for (int_px, int_py) in list_cc_pts:
+                cv2.circle(arr_v2, (int(int_px), int(int_py)), 3, tpl_ppp, -1)
+            cv2.imwrite(str(path_tileDebugDir / f"{str_prefix}_prompt_2_cc.png"), arr_v2)
+
+        # 4. PPP(gray=이전) + NPP(green=신규) → 반전 이진화
+        if list_posPoints or list_negPoints:
+            arr_v4 = cv2.cvtColor(cv2.bitwise_not(arr_binary), cv2.COLOR_GRAY2BGR)
+            for (int_px, int_py) in list_posPoints:
+                cv2.circle(arr_v4, (int(int_px), int(int_py)), 3, tpl_prev, -1)
+            for (int_px, int_py) in list_negPoints:
+                cv2.circle(arr_v4, (int(int_px), int(int_py)), 3, tpl_npp, -1)
+            cv2.imwrite(str(path_tileDebugDir / f"{str_prefix}_prompt_4_npp.png"), arr_v4)
+
+        # 5. 완성형: 모든 PPP(magenta) + 모든 NPP(green) → 타일 원본
+        if list_posPoints or list_negPoints:
+            arr_v5 = arr_tileBgr.copy()
+            for (int_px, int_py) in list_posPoints:
+                cv2.circle(arr_v5, (int(int_px), int(int_py)), 3, tpl_ppp, -1)
+            for (int_px, int_py) in list_negPoints:
+                cv2.circle(arr_v5, (int(int_px), int(int_py)), 3, tpl_npp, -1)
+            cv2.imwrite(str(path_tileDebugDir / f"{str_prefix}_prompt_5_colored.png"), arr_v5)
+
     def predict_tiled_point_prompts(
         self,
         arr_inputBgr: np.ndarray,
@@ -315,6 +392,11 @@ class Sam2AspectRatioService:
         int_acceptedCount = 0
         int_bboxDedupRejected = 0
 
+        path_tileDebugDir: tp.Optional[Path] = None
+        if self.obj_config.bool_debug:
+            path_tileDebugDir = self.obj_config.path_outputDir / "debug_tiles"
+            path_tileDebugDir.mkdir(exist_ok=True)
+
         for int_tileIdx, (int_tx1, int_ty1, int_tx2, int_ty2) in enumerate(list_tiles):
             arr_tileBgr = arr_inputBgr[int_ty1:int_ty2, int_tx1:int_tx2].copy()
             list_posPoints: tp.List[tp.Tuple[int, int]] = []
@@ -338,6 +420,7 @@ class Sam2AspectRatioService:
                         print(f"[WARN] tile {int_tileIdx} legacy 포인트 추출 실패 (skip): {exc}", flush=True)
                 else:
                     # ── HCT 방식 (기본) ──────────────────────────────────
+                    dict_hctInfo = None
                     try:
                         list_isolatedMasks, list_posPoints, list_negPoints, dict_hctInfo = detect_hct_prompts(
                             arr_tileGray=arr_tileGray,
@@ -358,6 +441,12 @@ class Sam2AspectRatioService:
                             list_debugCcContours.append(cnt_roi)
                     except Exception as exc:
                         print(f"[WARN] tile {int_tileIdx} 포인트 추출 실패 (skip): {exc}", flush=True)
+
+                    if path_tileDebugDir is not None and dict_hctInfo is not None:
+                        self._save_tile_prompt_debug_images(
+                            path_tileDebugDir, int_tileIdx, arr_tileBgr, arr_tileGray,
+                            dict_hctInfo, list_posPoints, list_negPoints, int_numHctPos,
+                        )
 
                 # ── isolated 마스크: OpenCV 직접 수용 ──────────────────────────
                 for arr_tileMask in list_isolatedMasks:
@@ -1235,6 +1324,7 @@ class Sam2AspectRatioService:
         dict_debug: tp.Dict[str, tp.Any],
         arr_raw_masks: tp.Optional[np.ndarray] = None,
         arr_restoration_viz: tp.Optional[np.ndarray] = None,
+        arr_restoration_after_viz: tp.Optional[np.ndarray] = None,
         arr_brightness_filter_viz: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
@@ -1416,6 +1506,9 @@ class Sam2AspectRatioService:
 
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
+
+        if arr_restoration_after_viz is not None:
+            cv2.imwrite(str(self.obj_config.path_outputDir / "restoration_after.png"), arr_restoration_after_viz)
 
         if arr_brightness_filter_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "brightness_filter.png"),
@@ -1650,6 +1743,7 @@ class Sam2AspectRatioService:
         list_validMasks: tp.List[np.ndarray] = []
 
         arr_restoration_viz = arr_inputRoiBgr.copy()
+        arr_restoration_after_viz = arr_inputRoiBgr.copy()
 
         # 밝기 필터 기준: Otsu 임계값 × k 미만 평균 밝기 → 배경으로 간주
         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
@@ -1758,6 +1852,17 @@ class Sam2AspectRatioService:
                                (int(round(float_cx)), int(round(float_cy))),
                                int(round(float_r)), (0, 200, 255), 1)
                     arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
+
+            # 복원 후 마스크: masks_raw.png와 동일한 색상 규칙(인덱스 기반 HSV)으로 오버레이
+            int_hue = (int_index * 37) % 180
+            tpl_restoredColor = cv2.cvtColor(
+                np.array([[[int_hue, 200, 200]]], dtype=np.uint8), cv2.COLOR_HSV2BGR
+            )[0, 0].tolist()
+            arr_restoredBool = arr_mask.astype(bool)
+            arr_restoration_after_viz[arr_restoredBool] = (
+                arr_restoration_after_viz[arr_restoredBool].astype(np.float32) * 0.5
+                + np.array(tpl_restoredColor, dtype=np.float32) * 0.5
+            ).astype(np.uint8)
 
             if self.obj_config.bool_convexMasks:
                 arr_mask = self._hull_mask(arr_mask)
@@ -1869,6 +1974,7 @@ class Sam2AspectRatioService:
             dict_debug,
             arr_raw_masks=arr_masks,
             arr_restoration_viz=arr_restoration_viz,
+            arr_restoration_after_viz=arr_restoration_after_viz,
             arr_brightness_filter_viz=arr_bf_viz,
         )
 
