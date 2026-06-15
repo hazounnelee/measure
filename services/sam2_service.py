@@ -1324,6 +1324,7 @@ class Sam2AspectRatioService:
         dict_debug: tp.Dict[str, tp.Any],
         arr_raw_masks: tp.Optional[np.ndarray] = None,
         arr_restoration_viz: tp.Optional[np.ndarray] = None,
+        arr_restoration_after_viz: tp.Optional[np.ndarray] = None,
         arr_brightness_filter_viz: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 최종 산출물을 저장한다.
@@ -1505,6 +1506,9 @@ class Sam2AspectRatioService:
 
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
+
+        if arr_restoration_after_viz is not None:
+            cv2.imwrite(str(self.obj_config.path_outputDir / "restoration_after.png"), arr_restoration_after_viz)
 
         if arr_brightness_filter_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "brightness_filter.png"),
@@ -1739,6 +1743,7 @@ class Sam2AspectRatioService:
         list_validMasks: tp.List[np.ndarray] = []
 
         arr_restoration_viz = arr_inputRoiBgr.copy()
+        arr_restoration_after_viz = arr_inputRoiBgr.copy()
 
         # 밝기 필터 기준: Otsu 임계값 × k 미만 평균 밝기 → 배경으로 간주
         arr_gray_roi = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
@@ -1847,6 +1852,17 @@ class Sam2AspectRatioService:
                                (int(round(float_cx)), int(round(float_cy))),
                                int(round(float_r)), (0, 200, 255), 1)
                     arr_restoration_viz[arr_bright.astype(bool)] = (255, 80, 0)
+
+            # 복원 후 마스크: masks_raw.png와 동일한 색상 규칙(인덱스 기반 HSV)으로 오버레이
+            int_hue = (int_index * 37) % 180
+            tpl_restoredColor = cv2.cvtColor(
+                np.array([[[int_hue, 200, 200]]], dtype=np.uint8), cv2.COLOR_HSV2BGR
+            )[0, 0].tolist()
+            arr_restoredBool = arr_mask.astype(bool)
+            arr_restoration_after_viz[arr_restoredBool] = (
+                arr_restoration_after_viz[arr_restoredBool].astype(np.float32) * 0.5
+                + np.array(tpl_restoredColor, dtype=np.float32) * 0.5
+            ).astype(np.uint8)
 
             if self.obj_config.bool_convexMasks:
                 arr_mask = self._hull_mask(arr_mask)
@@ -1958,6 +1974,7 @@ class Sam2AspectRatioService:
             dict_debug,
             arr_raw_masks=arr_masks,
             arr_restoration_viz=arr_restoration_viz,
+            arr_restoration_after_viz=arr_restoration_after_viz,
             arr_brightness_filter_viz=arr_bf_viz,
         )
 
