@@ -323,11 +323,15 @@ Mask를 가로지르는 가장 긴 연속 수평/수직 span도 기록됩니다 
 
 | 조건 | 분류 |
 |-----------|----------|
-| `mask_area < area_threshold` | `fragment` |
+| `mask_area < area_threshold` | 제외 (1차입자로 분류하지 않음) |
 | `aspect_ratio < acicular_threshold` (0.40) | `acicular` |
 | 그 외 | `plate` |
 
-`--particle_type`이 설정되면 해당 분류만 유지됩니다.
+`--particle_type`이 `acicular`/`plate`로 설정되면 해당 분류만 유지됩니다. `active` 등 형태 무관 타입은 모두 유지됩니다.
+
+#### Step 9 — Convex Hull 최종화
+
+분류·필터링을 통과한 마스크는 convex hull을 적용해 최종 mask로 사용하고, hull 적용 후 좌표로 재측정합니다 (`--small`/`--active` 공통).
 
 #### Acicular hybrid 모드 (`--particle_mode acicular`)
 
@@ -375,7 +379,7 @@ Sphericity 측정은 `cv2.arcLength`로 계산한 contour perimeter를 사용합
 |------|---------|
 | `01_input.png` | 정규화된 입력 이미지 (2048×1536) |
 | `02_input_roi.png` | 분석에 사용된 ROI |
-| `03_overlay_roi.png` | Segmentation overlay: acicular=빨간색, plate=초록색, fragment=주황색 |
+| `03_overlay_roi.png` | Segmentation overlay (mask + contour) |
 | `04_overlay_full.png` | ROI 사각형이 강조된 전체 이미지 |
 | `05_opencv_candidates.png` | LSD 최종 선분: 초록=acicular, 주황=plate (LSD 모드) |
 | `06_sphere_detection.png` | 구 중심 + cap ROI 시각화 (20k만 생성) |
@@ -392,7 +396,7 @@ Sphericity 측정은 `cv2.arcLength`로 계산한 contour perimeter를 사용합
 | `summary.json` | 통계 및 분석 설정 (roi_density 포함) |
 | `objects.json` | 입자별 상세 측정값 |
 | `debug.json` | 타일, point, mask 디버그 정보 |
-| `acicular_masks/` | 개별 mask PNG (`--save_mask_imgs` 시) |
+| `acicular_masks/` `plate_masks/` | 개별 mask PNG (`--save_mask_imgs` 시) |
 
 ### 2차 파이프라인 출력
 

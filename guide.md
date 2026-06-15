@@ -324,11 +324,15 @@ Additionally, the longest contiguous horizontal and vertical spans across the ma
 
 | Condition | Category |
 |-----------|----------|
-| `mask_area < area_threshold` | `fragment` |
+| `mask_area < area_threshold` | excluded (not classified as a primary particle) |
 | `aspect_ratio < acicular_threshold` (0.40) | `acicular` |
 | otherwise | `plate` |
 
-When `--particle_type` is set, only the matching category is kept.
+When `--particle_type` is `acicular`/`plate`, only the matching category is kept. Shape-agnostic types such as `active` keep everything.
+
+#### Step 9 — Convex hull finalization
+
+Masks that pass classification/filtering are replaced by their convex hull, and re-measured from the hull-applied mask (shared by `--small`/`--active`).
 
 #### Acicular hybrid mode (`--particle_mode acicular`)
 
@@ -376,7 +380,7 @@ There is no acicular/plate distinction in secondary mode.
 |------|---------|
 | `01_input.png` | Normalised input image (2048×1536) |
 | `02_input_roi.png` | Cropped ROI used for analysis |
-| `03_overlay_roi.png` | Segmentation overlay: acicular=red, plate=green, fragment=orange |
+| `03_overlay_roi.png` | Segmentation overlay (mask + contour) |
 | `04_overlay_full.png` | Full image with ROI rectangle highlighted |
 | `05_opencv_candidates.png` | LSD final lines: green=acicular, orange=plate (LSD mode) |
 | `06_sphere_detection.png` | Sphere centre + cap ROI visualisation (20k only) |
@@ -393,7 +397,7 @@ There is no acicular/plate distinction in secondary mode.
 | `summary.json` | Statistics and analysis settings |
 | `objects.json` | Per-particle measurements |
 | `debug.json` | Tile, point, and mask debug information |
-| `acicular_masks/` | Individual mask PNGs (when `--save_mask_imgs`) |
+| `acicular_masks/` `plate_masks/` | Individual mask PNGs (when `--save_mask_imgs`) |
 
 ### Secondary pipeline outputs
 
