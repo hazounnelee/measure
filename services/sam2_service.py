@@ -1337,6 +1337,8 @@ class Sam2AspectRatioService:
         arr_binary_inv_bgr = cv2.cvtColor(
             cv2.bitwise_not(arr_binary_dbg), cv2.COLOR_GRAY2BGR)
 
+        arr_v1 = arr_v2 = arr_v4 = arr_v5 = None
+
         # 1. HCT 원(blue) + HCT PPP(magenta) → 원본 ROI
         if list_hct_circles or list_hct_pts:
             arr_v1 = arr_inputRoiBgr.copy()
@@ -1399,6 +1401,28 @@ class Sam2AspectRatioService:
                 int_py = int(dict_pt["point_xy_roi"][1])
                 cv2.circle(arr_v5, (int_px, int_py), 3, tpl_npp, -1)
             cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_5_colored.png"), arr_v5)
+
+        # 타일별 prompt 디버그 이미지 (ROI 전체 이미지를 타일 영역으로 crop)
+        if list_tiles:
+            path_tilesDir = self.obj_config.path_outputDir / "debug_tiles"
+            path_tilesDir.mkdir(exist_ok=True)
+            dict_promptViz = {
+                "prompt_1_hct": arr_v1,
+                "prompt_2_cc": arr_v2,
+                "prompt_4_npp": arr_v4,
+                "prompt_5_colored": arr_v5,
+            }
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                int_tileIdx = dict_t["tile_index"]
+                for str_name, arr_viz in dict_promptViz.items():
+                    if arr_viz is None:
+                        continue
+                    arr_tileCrop = arr_viz[int_ty1:int_ty2, int_tx1:int_tx2]
+                    cv2.imwrite(
+                        str(path_tilesDir / f"tile_{int_tileIdx:03d}_{str_name}.png"),
+                        arr_tileCrop,
+                    )
 
         if arr_raw_masks is not None and len(arr_raw_masks) > 0:
             arr_raw_viz = arr_inputRoiBgr.copy()
