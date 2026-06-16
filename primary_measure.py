@@ -136,6 +136,7 @@ def main() -> None:
         bool_fuseContours=obj_args.fuse,
         bool_advancedFuseContours=obj_args.advanced_fuse,
         int_preprocessWidth=obj_args.preprocess_width,
+        bool_debug=obj_args.debug,
     )
 
     print("===== 1차 입자 분석 결과 요약 =====")
