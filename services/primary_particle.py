@@ -902,6 +902,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         dict_debug: tp.Dict[str, tp.Any],
         arr_opencvDebugMask: tp.Optional[np.ndarray] = None,
         dict_lsdSteps: tp.Optional[tp.Dict[str, np.ndarray]] = None,
+        arr_rawMasks: tp.Optional[np.ndarray] = None,
     ) -> None:
         """이미지, CSV, JSON, histogram 등 1차 입자 분석 산출물을 저장한다."""
         self.obj_config.path_outputDir.mkdir(parents=True, exist_ok=True)
@@ -995,12 +996,15 @@ class PrimaryParticleService(Sam2AspectRatioService):
         with (self.obj_config.path_outputDir / "summary.json").open(
                 "w", encoding="utf-8") as obj_f:
             json_dump_safe(dict_summary, obj_f)
-        with (self.obj_config.path_outputDir / "objects.json").open(
-                "w", encoding="utf-8") as obj_f:
-            json_dump_safe([asdict(o) for o in list_objects], obj_f)
-        with (self.obj_config.path_outputDir / "debug.json").open(
-                "w", encoding="utf-8") as obj_f:
-            json_dump_safe(dict_debug, obj_f)
+
+        if self.obj_config.bool_debug:
+            with (self.obj_config.path_outputDir / "objects.json").open(
+                    "w", encoding="utf-8") as obj_f:
+                json_dump_safe([asdict(o) for o in list_objects], obj_f)
+            with (self.obj_config.path_outputDir / "debug.json").open(
+                    "w", encoding="utf-8") as obj_f:
+                json_dump_safe(dict_debug, obj_f)
+            self._save_sam2_debug_visuals(arr_inputRoiBgr, dict_debug, arr_rawMasks)
 
         if not self.obj_config.bool_saveIndividualMasks:
             return
@@ -1153,6 +1157,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             list_objects, list_validMasks,
             dict_summary, dict_roi, dict_debug,
             arr_opencvDebugMask=arr_opencvDebugMask,
+            arr_rawMasks=arr_masks,
         )
 
         return PrimaryParticleResult(list_objects=list_objects, dict_summary=dict_summary)
@@ -1210,6 +1215,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
         bool_fuseContours: bool,
         bool_advancedFuseContours: bool = False,
         int_preprocessWidth: int = 1024,
+        bool_debug: bool = False,
     ) -> PrimaryParticleConfig:
         return PrimaryParticleConfig(
             path_input=path_image,
@@ -1261,6 +1267,7 @@ class PrimaryParticleService(Sam2AspectRatioService):
             bool_fuseContours=bool_fuseContours,
             bool_advancedFuseContours=bool_advancedFuseContours,
             int_preprocessWidth=int_preprocessWidth,
+            bool_debug=bool_debug,
         )
 
 
@@ -1439,6 +1446,7 @@ def run_primary_particle_analysis(
     bool_fuseContours: bool = False,
     bool_advancedFuseContours: bool = False,
     int_preprocessWidth: int = 1024,
+    bool_debug: bool = False,
 ) -> tp.Dict[str, tp.Any]:
     """외부에서 호출 가능한 최상위 실행 함수.
 
@@ -1512,6 +1520,7 @@ def run_primary_particle_analysis(
             bool_fuseContours=bool_fuseContours,
             bool_advancedFuseContours=bool_advancedFuseContours,
             int_preprocessWidth=int_preprocessWidth,
+            bool_debug=bool_debug,
         )
 
     # 단일 이미지
@@ -1877,6 +1886,14 @@ def build_primary_arg_parser() -> argparse.ArgumentParser:
             "'lsd': LSD(Line Segment Detector) + 수직 강도 프로파일 직접 측정 "
             "(SAM2 불필요, 매우 빠름, 대량 탐지). "
             "acicular 프리셋은 기본으로 'lsd'를 사용."
+        ),
+    )
+    obj_parser.add_argument(
+        "--debug", action="store_true", default=False,
+        help=(
+            "디버그 이미지/파일 저장 "
+            "(tiles.png, prompt_1_hct.png, prompt_2_cc.png, prompt_4_npp.png, "
+            "prompt_5_colored.png, masks_raw.png, debug_tiles/, objects.json, debug.json)."
         ),
     )
 

@@ -1312,6 +1312,122 @@ class Sam2AspectRatioService:
         arr_bar = create_stats_bar(str_stats, int_ow, float_scale)
         return np.vstack([arr_img, arr_bar])
 
+    def _save_sam2_debug_visuals(
+        self,
+        arr_inputRoiBgr: np.ndarray,
+        dict_debug: tp.Dict[str, tp.Any],
+        arr_raw_masks: tp.Optional[np.ndarray] = None,
+    ) -> None:
+        """tiles, prompt, masks_raw 디버그 이미지를 output 디렉터리에 저장한다.
+
+        save_outputs(secondary)와 save_primary_outputs(primary) 양쪽에서 공유하는 로직.
+        bool_debug 체크는 호출 측에서 수행한다.
+        """
+        path_out = self.obj_config.path_outputDir
+
+        # 타일 그리드
+        list_tiles = dict_debug.get("tiles", [])
+        if list_tiles:
+            arr_tiles_viz = arr_inputRoiBgr.copy()
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                cv2.rectangle(arr_tiles_viz, (int_tx1, int_ty1), (int_tx2, int_ty2),
+                              (200, 200, 0), 1)
+            cv2.imwrite(str(path_out / "tiles.png"), arr_tiles_viz)
+
+            path_tilesDir = path_out / "debug_tiles"
+            path_tilesDir.mkdir(exist_ok=True)
+            for dict_t in list_tiles:
+                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
+                arr_tile = arr_inputRoiBgr[int_ty1:int_ty2, int_tx1:int_tx2]
+                cv2.imwrite(str(path_tilesDir / f"tile_{dict_t['tile_index']:03d}.png"), arr_tile)
+
+        # 프롬프트 디버그 이미지 — 색상 규칙: PPP=magenta, NPP=green, 이전=gray, 기하=blue
+        list_hct_circles = dict_debug.get("hct_circles", [])
+        list_all_pts = dict_debug.get("candidate_points", [])
+        list_hct_pts = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "hct"]
+        list_cc_pts  = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "cc"]
+        list_pos_pts = [p for p in list_all_pts if p.get("label", 1) == 1]
+        list_neg_pts = [p for p in list_all_pts if p.get("label", 0) == 0]
+        list_cc_contours = dict_debug.get("cc_contours", [])
+
+        tpl_ppp  = (255, 0, 255)
+        tpl_npp  = (0, 255, 0)
+        tpl_prev = (160, 160, 160)
+        tpl_geom = (255, 0, 0)
+
+        arr_gray_dbg = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
+        arr_blur_dbg = cv2.GaussianBlur(arr_gray_dbg, (5, 5), 0)
+        _, arr_binary_dbg = cv2.threshold(
+            arr_blur_dbg, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        arr_binary_inv_bgr = cv2.cvtColor(
+            cv2.bitwise_not(arr_binary_dbg), cv2.COLOR_GRAY2BGR)
+
+        if list_hct_circles or list_hct_pts:
+            arr_v1 = arr_inputRoiBgr.copy()
+            for dict_c in list_hct_circles:
+                int_cx, int_cy = dict_c["center_roi"]
+                cv2.circle(arr_v1, (int_cx, int_cy), dict_c["radius"], tpl_geom, 1)
+            for dict_pt in list_hct_pts:
+                cv2.circle(arr_v1, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_ppp, -1)
+            cv2.imwrite(str(path_out / "prompt_1_hct.png"), arr_v1)
+
+        if list_hct_pts or list_cc_pts:
+            arr_k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            arr_fg_dbg = cv2.morphologyEx(arr_binary_dbg, cv2.MORPH_CLOSE, arr_k5, iterations=2)
+            arr_fg_dbg = cv2.morphologyEx(arr_fg_dbg, cv2.MORPH_OPEN,  arr_k5, iterations=1)
+            arr_circles_mask_dbg = np.zeros_like(arr_binary_dbg)
+            for dict_c in list_hct_circles:
+                int_cx, int_cy = dict_c["center_roi"]
+                cv2.circle(arr_circles_mask_dbg, (int_cx, int_cy), dict_c["radius"], 255, -1)
+            arr_uncov = cv2.bitwise_and(arr_fg_dbg, cv2.bitwise_not(arr_circles_mask_dbg))
+            arr_k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            arr_uncov = cv2.morphologyEx(arr_uncov, cv2.MORPH_OPEN, arr_k3, iterations=1)
+            arr_v2 = cv2.cvtColor(arr_uncov, cv2.COLOR_GRAY2BGR)
+            if list_cc_contours:
+                cv2.drawContours(arr_v2, list_cc_contours, -1, tpl_geom, 1)
+            for dict_pt in list_hct_pts:
+                cv2.circle(arr_v2, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_prev, -1)
+            for dict_pt in list_cc_pts:
+                cv2.circle(arr_v2, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_ppp, -1)
+            cv2.imwrite(str(path_out / "prompt_2_cc.png"), arr_v2)
+
+        if list_pos_pts or list_neg_pts:
+            arr_v4 = arr_binary_inv_bgr.copy()
+            for dict_pt in list_pos_pts:
+                cv2.circle(arr_v4, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_prev, -1)
+            for dict_pt in list_neg_pts:
+                cv2.circle(arr_v4, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_npp, -1)
+            cv2.imwrite(str(path_out / "prompt_4_npp.png"), arr_v4)
+
+            arr_v5 = arr_inputRoiBgr.copy()
+            for dict_pt in list_pos_pts:
+                cv2.circle(arr_v5, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_ppp, -1)
+            for dict_pt in list_neg_pts:
+                cv2.circle(arr_v5, (int(dict_pt["point_xy_roi"][0]), int(dict_pt["point_xy_roi"][1])),
+                           3, tpl_npp, -1)
+            cv2.imwrite(str(path_out / "prompt_5_colored.png"), arr_v5)
+
+        if arr_raw_masks is not None and len(arr_raw_masks) > 0:
+            arr_raw_viz = arr_inputRoiBgr.copy()
+            for int_i, arr_m in enumerate(arr_raw_masks):
+                int_hue = (int_i * 37) % 180
+                tpl_c = cv2.cvtColor(
+                    np.array([[[int_hue, 200, 200]]], dtype=np.uint8), cv2.COLOR_HSV2BGR
+                )[0, 0].tolist()
+                arr_bool = arr_m.astype(bool)
+                arr_raw_viz[arr_bool] = (
+                    arr_raw_viz[arr_bool].astype(np.float32) * 0.5
+                    + np.array(tpl_c, dtype=np.float32) * 0.5
+                ).astype(np.uint8)
+            cv2.imwrite(str(path_out / "masks_raw.png"), arr_raw_viz)
+
     def save_outputs(
         self,
         arr_inputBgr: np.ndarray,
@@ -1388,121 +1504,7 @@ class Sam2AspectRatioService:
         cv2.imwrite(str(self.obj_config.path_outputDir / "overlay_Sp.png"),
                     self._append_stats_bar(arr_overlay_Sp, dict_summary))
 
-        # 파이프라인 단계별 이미지
-        list_tiles = dict_debug.get("tiles", [])
-        if list_tiles:
-            arr_tiles_viz = arr_inputRoiBgr.copy()
-            for dict_t in list_tiles:
-                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
-                cv2.rectangle(arr_tiles_viz, (int_tx1, int_ty1), (int_tx2, int_ty2),
-                              (200, 200, 0), 1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "tiles.png"), arr_tiles_viz)
-
-            path_tilesDir = self.obj_config.path_outputDir / "debug_tiles"
-            path_tilesDir.mkdir(exist_ok=True)
-            for dict_t in list_tiles:
-                int_tx1, int_ty1, int_tx2, int_ty2 = dict_t["tile_xyxy"]
-                arr_tile = arr_inputRoiBgr[int_ty1:int_ty2, int_tx1:int_tx2]
-                cv2.imwrite(str(path_tilesDir / f"tile_{dict_t['tile_index']:03d}.png"), arr_tile)
-
-        # ── 프롬프트 계산 과정 디버그 이미지 ──────────────────────────────
-        # 색상 규칙: PPP=magenta, NPP=green, 이전 단계=gray, 기하=blue
-        list_hct_circles = dict_debug.get("hct_circles", [])
-        list_all_pts = dict_debug.get("candidate_points", [])
-        list_hct_pts = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "hct"]
-        list_cc_pts = [p for p in list_all_pts if p.get("label", 1) == 1 and p.get("source") == "cc"]
-        list_pos_pts = [p for p in list_all_pts if p.get("label", 1) == 1]
-        list_neg_pts = [p for p in list_all_pts if p.get("label", 0) == 0]
-        list_cc_contours = dict_debug.get("cc_contours", [])
-
-        tpl_ppp = (255, 0, 255)      # magenta: positive point prompt (신규)
-        tpl_npp = (0, 255, 0)        # green: negative point prompt (신규)
-        tpl_prev = (160, 160, 160)   # gray: 이전 단계 포인트
-        tpl_geom = (255, 0, 0)       # blue: 기하 피처 (원, 컨투어)
-
-        arr_gray_dbg = cv2.cvtColor(arr_inputRoiBgr, cv2.COLOR_BGR2GRAY)
-        arr_blur_dbg = cv2.GaussianBlur(arr_gray_dbg, (5, 5), 0)
-        _, arr_binary_dbg = cv2.threshold(
-            arr_blur_dbg, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        arr_binary_inv_bgr = cv2.cvtColor(
-            cv2.bitwise_not(arr_binary_dbg), cv2.COLOR_GRAY2BGR)
-
-        # 1. HCT 원(blue) + HCT PPP(magenta) → 원본 ROI
-        if list_hct_circles or list_hct_pts:
-            arr_v1 = arr_inputRoiBgr.copy()
-            for dict_c in list_hct_circles:
-                int_cx, int_cy = dict_c["center_roi"]
-                cv2.circle(arr_v1, (int_cx, int_cy), dict_c["radius"], tpl_geom, 1)
-            for dict_pt in list_hct_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v1, (int_px, int_py), 3, tpl_ppp, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_1_hct.png"), arr_v1)
-
-        # 2. CC 배경(HCT 제외 전경 마스크) + HCT PPP(gray) + CC 컨투어(blue) + CC PPP(magenta)
-        if list_hct_pts or list_cc_pts:
-            arr_k5 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            arr_fg_dbg = cv2.morphologyEx(arr_binary_dbg, cv2.MORPH_CLOSE, arr_k5, iterations=2)
-            arr_fg_dbg = cv2.morphologyEx(arr_fg_dbg, cv2.MORPH_OPEN, arr_k5, iterations=1)
-            arr_circles_mask_dbg = np.zeros_like(arr_binary_dbg)
-            for dict_c in list_hct_circles:
-                int_cx, int_cy = dict_c["center_roi"]
-                cv2.circle(arr_circles_mask_dbg, (int_cx, int_cy), dict_c["radius"], 255, -1)
-            arr_uncov = cv2.bitwise_and(arr_fg_dbg, cv2.bitwise_not(arr_circles_mask_dbg))
-            arr_k3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            arr_uncov = cv2.morphologyEx(arr_uncov, cv2.MORPH_OPEN, arr_k3, iterations=1)
-            arr_v2 = cv2.cvtColor(arr_uncov, cv2.COLOR_GRAY2BGR)
-            if list_cc_contours:
-                cv2.drawContours(arr_v2, list_cc_contours, -1, tpl_geom, 1)
-            for dict_pt in list_hct_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v2, (int_px, int_py), 3, tpl_prev, -1)
-            for dict_pt in list_cc_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v2, (int_px, int_py), 3, tpl_ppp, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_2_cc.png"), arr_v2)
-
-        # 4. PPP(gray=이전) + NPP(green=신규) → 반전 이진화
-        if list_pos_pts or list_neg_pts:
-            arr_v4 = arr_binary_inv_bgr.copy()
-            for dict_pt in list_pos_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_prev, -1)
-            for dict_pt in list_neg_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v4, (int_px, int_py), 3, tpl_npp, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_4_npp.png"), arr_v4)
-
-        # 5. 완성형: 모든 PPP(magenta) + 모든 NPP(green) → 원본 ROI
-        if list_pos_pts or list_neg_pts:
-            arr_v5 = arr_inputRoiBgr.copy()
-            for dict_pt in list_pos_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v5, (int_px, int_py), 3, tpl_ppp, -1)
-            for dict_pt in list_neg_pts:
-                int_px = int(dict_pt["point_xy_roi"][0])
-                int_py = int(dict_pt["point_xy_roi"][1])
-                cv2.circle(arr_v5, (int_px, int_py), 3, tpl_npp, -1)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "prompt_5_colored.png"), arr_v5)
-
-        if arr_raw_masks is not None and len(arr_raw_masks) > 0:
-            arr_raw_viz = arr_inputRoiBgr.copy()
-            for int_i, arr_m in enumerate(arr_raw_masks):
-                int_hue = (int_i * 37) % 180
-                tpl_c = cv2.cvtColor(
-                    np.array([[[int_hue, 200, 200]]], dtype=np.uint8), cv2.COLOR_HSV2BGR
-                )[0, 0].tolist()
-                arr_bool = arr_m.astype(bool)
-                arr_raw_viz[arr_bool] = (
-                    arr_raw_viz[arr_bool].astype(np.float32) * 0.5
-                    + np.array(tpl_c, dtype=np.float32) * 0.5
-                ).astype(np.uint8)
-            cv2.imwrite(str(self.obj_config.path_outputDir / "masks_raw.png"), arr_raw_viz)
+        self._save_sam2_debug_visuals(arr_inputRoiBgr, dict_debug, arr_raw_masks)
 
         if arr_restoration_viz is not None:
             cv2.imwrite(str(self.obj_config.path_outputDir / "restoration.png"), arr_restoration_viz)
